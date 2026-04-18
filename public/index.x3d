@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 4.0//EN" "https://www.web3d.org/specifications/x3d-4.0.dtd">
+<X3D profile="Immersive" version="4.0" xsd:noNamespaceSchemaLocation="https://www.web3d.org/specifications/x3d-4.0.xsd" xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance">
+<Scene id="scene">
+	<Billboard axisOfRotation="0 0 0">
+		<Shape>
+			<Appearance>
+				<Material diffuseColor="0 1 1" emissiveColor="1 1 0">
+				</Material>
+			</Appearance>
+			<Text string='"Object"' solid="true">
+				<FontStyle size="24" family="&quot;SERIF&quot;" justify="&quot;BEGIN&quot;">
+				</FontStyle>
+			</Text>
+		</Shape>
+	</Billboard>
+</Scene>
+</X3D>

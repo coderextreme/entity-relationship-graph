@@ -1,0 +1,131 @@
+Okay, let's integrate the D3.js compatible JSON export format into the prompt. This format is specifically designed for network visualizations and is inherently different from trying to reproduce the exact original structure verbatim.
+
+Prompt:
+
+Please create a system for storing and retrieving arbitrary Python object graphs (representing potentially complex JavaScript-like data structures) using an SQLite database. The system should consist of three Python scripts: one to create the database schema, one to import data into the database, and one to export data from the database in various formats.
+
+I. Database Schema (generic_store.db)
+
+Design an SQLite schema with three tables: EntityType, Entity, and Relationship.
+
+EntityType Table:
+
+Columns: id (INTEGER PRIMARY KEY AUTOINCREMENT), name (TEXT UNIQUE NOT NULL).
+
+Initial Data: Must contain 'Object', 'Array', 'Version', 'String', 'Number', 'Boolean', 'Null'.
+
+Entity Table:
+
+Columns: id, entity_type_id (FK), value_str, value_num, value_bool.
+
+Purpose: Represents every node. Value columns are NULL for containers ('Object', 'Array', 'Version').
+
+Relationship Table:
+
+Columns: id, parent_entity_id (FK), child_entity_id (FK), relationship_specifier_id (FK).
+
+Purpose: Defines graph structure. child_entity_id and relationship_specifier_id can reference any Entity type.
+
+For 'Version' parents, specifiers can be 'String' (key) or 'Number' (index).
+
+Constraints: UNIQUE(parent_entity_id, relationship_specifier_id).
+
+II. Python Scripts
+
+Create three separate Python 3 scripts using sqlite3.
+
+create_schema.py:
+
+Creates/recreates the DB file (e.g., generic_store.db).
+
+Executes CREATE TABLE statements.
+
+Enforces foreign keys.
+
+Populates EntityType table.
+
+Creates indexes.
+
+import_data.py:
+
+Accepts an input file path via argparse. Detect file type:
+
+.py: Load data_structure variable using importlib.
+
+.json: Load using json.load().
+
+Connects to the database.
+
+Implements import_node to recursively traverse the loaded Python object graph.
+
+For each node:
+
+Map Python types to DB EntityType (dict->'Object', list->'Array', collections.OrderedDict->'Version', tuple->'Array'/'Tuple', primitives). Raise TypeError for unsupported types.
+
+Insert into Entity.
+
+Use id(node) -> entity_id cache for identity/cycles.
+
+For container nodes:
+
+dict ('Object'): Iterate items(). Import key & value. Create relationship (key's entity ID = specifier).
+
+list/tuple ('Array'/'Tuple'): Iterate enumerate(). Import index (as 'Number' entity) & value. Create relationship (index's entity ID = specifier).
+
+OrderedDict ('Version'): Iterate items(). Import key & value. Create relationship (key's entity ID = specifier). Preserve order.
+
+Use transactions.
+
+export_data.py:
+
+Accepts output file path, optional database path, and --format via argparse.
+
+Supported formats: 'pickle', 'pprint', 'javascript' (or 'js'), 'd3json'. Default 'pickle'.
+
+Connects to the database.
+
+For 'pickle', 'pprint', 'javascript': Find root entity, implement rebuild_node using caching for sharing/cycles.
+
+rebuild_node logic (for 'pickle', 'pprint', 'javascript'):
+
+Fetch entity data. Base cases for primitives.
+
+Containers: Rebuild to dict, list/list-of-pairs, OrderedDict as specified before. Handle non-hashable keys, non-standard array specifiers with warnings.
+
+Perform export based on format:
+
+'pickle': Use pickle.dump().
+
+'pprint': Use pprint.pformat().
+
+'javascript':
+
+Implement recursive JS literal serializer from the rebuilt object.
+
+Handle non-string keys by string conversion (str(key)) with a warning.
+
+Represent non-standard arrays as [[spec, val], ...].
+
+Handle cycles/sharing by raising error or using placeholders (specify which).
+
+Write JS code assigning the literal to a variable.
+
+'d3json':
+
+Do not use rebuild_node for this format. Instead, query the database directly to build the node/link structure.
+
+Create a nodes list: Query all rows from Entity joined with EntityType. For each row, create a dictionary like {"id": entity.id, "type": entity_type.name, "value": primitive_value}. (Choose how/if to represent primitive values value_str/num/bool). The id must correspond to Entity.id.
+
+Create a links list: Query all rows from Relationship. For each row, create a dictionary like {"source": parent_entity_id, "target": child_entity_id}.
+
+For each link, also fetch the relationship_specifier_id and its corresponding Entity data (type and primitive value). Add this information to the link dictionary:
+
+If the specifier is a primitive type (String, Number, Boolean, Null), add its value, e.g., {"label": "key_name"} or {"index": 0}.
+
+If the specifier is a container type (Object, Array, Version), add its entity ID and type name, e.g., {"specifier_id": spec_id, "specifier_type": "Object"}.
+
+Combine these into a root dictionary: {"nodes": nodes_list, "links": links_list}.
+
+Use json.dump() to serialize this root dictionary to the output file. This structure is guaranteed to be JSON-serializable.
+
+Ensure all scripts include necessary imports, error handling, clear print statements, command-line usability, and comments explaining logic, especially the different export strategies and handling of complex types/cycles for each format.

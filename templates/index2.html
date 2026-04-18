@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSON File System Explorer</title>
+    <style>
+        body { font-family: sans-serif; }
+        #treeview { margin-top: 20px; }
+        .node { cursor: pointer; }
+        .node.folder > .name::before {
+            content: "▶ "; /* Unicode right-pointing triangle */
+        }
+        .node.folder.expanded > .name::before {
+            content: "▼ "; /* Unicode down-pointing triangle */
+        }
+        .name {
+            display: inline-block;
+            width: 200px;
+        }
+        .type { width: 100px; display: inline-block; }
+        .value { width: 200px; display: inline-block; }
+        #error-message { color: red; margin-top: 10px; }
+        .url-link {
+          display: inline-block;
+          padding: 2px 5px;
+          border: 1px solid #ccc;
+          border-radius: 4px;
+          text-decoration: none;
+          color: #007bff; /* Link color */
+        }
+
+        .url-link img {
+          width: 16px;
+          height: 16px;
+          vertical-align: middle;
+          margin-right: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>JSON File System Explorer</h1>
+
+    <input type="file" id="fileInput" accept=".json">
+    <button onclick="uploadFile()">Upload JSON</button>
+
+    <button onclick="goBack()" disabled id="backButton">Back</button>
+    <button onclick="goForward()" disabled id="forwardButton">Forward</button>
+
+    <div id="treeview"></div>
+    <div id="error-message"></div>
+
+    <script>
+        let historyEnabled = false;  // Track if the history is enabled.
+
+        function renderTree(data) {
+            const treeview = document.getElementById('treeview');
+            treeview.innerHTML = ''; // Clear existing tree
+
+            data.forEach(item => {
+                const node = document.createElement('div');
+                node.classList.add('node');
+                node.setAttribute('data-name', item.name);
+
+                if (item.children) {
+                    node.classList.add('folder');
+                    node.addEventListener('click', function(event) {
+                        event.stopPropagation(); // Prevent immediate navigation
+                        toggleExpand(this);
+                    });
+                } else {
+                    node.classList.add('file');
+                }
+
+                const nameSpan = document.createElement('span');
+                nameSpan.classList.add('name');
+                nameSpan.textContent = item.name;
+
+                const typeSpan = document.createElement('span');
+                typeSpan.classList.add('type');
+                typeSpan.textContent = item.type;
+
+                const valueSpan = document.createElement('span');
+                valueSpan.classList.add('value');
+
+                // Render URL as a link if applicable
+                if (typeof item.value === 'object' && item.value !== null && item.value.type === 'url') {
+                  const link = document.createElement('a');
+                  link.href = item.value.url;
+                  link.textContent = item.value.url;
+                  link.classList.add('url-link');
+                  link.target = "_blank"; // Open in new tab
+
+                  // Create image and append to the link
+                  const image = document.createElement('img');
+                  image.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAABhElEQVR4XmNgwAD+798P0MDQwMQw4gXh9o/rP1gKqKj0qj0u0uL//z8A4gXW0q8YmXWw85w9j/1v8T9YvO4exj5t0b8Y9bS4w/93/7h/N/G3Y9g3G+n/M9h/p/n/V/w/u/j/y/v/0z+o/i/2H0gP8//0f+j98/l/9H0/4f8/3sM5+j55/W3+w//r/mf8z/w//zP9M4tU2wUj9qf8z/y/7+f4z8X91/z/i/sY4M660J//e/w/6j8Tf9/+T/U//Xw2z/r/1s6H2d/y1P6I3j+G/f/7P4u5eHw3Q2H/V/5X815nJg9z/W8D4P47/u/3/7f3m8z4n/8/yv2t4p8D9c+l/h/J/5/0eF1uD+s489wY5h1v4Gz/T/z/q1+s/8j9Nf9/5XyK9x/U/uf9//z/V5Jqw3/6c1P9b4gP+/zP70s/x/x/y/Nl4QcKzT0cAAAAASUVORK5CYII="; // Example: Base64 encoded globe icon
+                  link.prepend(image);
+                  valueSpan.appendChild(link);
+
+                } else {
+                  valueSpan.textContent = item.value;  // Otherwise, normal text.
+                }
+
+                node.appendChild(nameSpan);
+                node.appendChild(typeSpan);
+                node.appendChild(valueSpan);
+                treeview.appendChild(node);
+
+                // Add double-click to navigate files
+                if (!item.children) {
+                    node.addEventListener('dblclick', function() {
+                      const errorMessageDiv = document.getElementById('error-message');
+                      errorMessageDiv.textContent = 'Files cannot be opened, they only display values.';
+                    });
+                }
+            });
+
+            //Enable or disable history
+            if (!historyEnabled && data.length > 0) {
+                historyEnabled = true;
+                enableHistoryButtons();
+            }
+        }
+
+        function uploadFile() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (file) {
+                const formData = new FormData();
+                formData.append('file', file);
+
+                fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        renderTree(data.data);
+                        clearErrorMessage();
+                    } else {
+                        displayErrorMessage(data.error);
+                    }
+                })
+                .catch(error => {
+                    displayErrorMessage('Error uploading file.');
+                });
+            } else {
+                displayErrorMessage('Please select a file.');
+            }
+        }
+
+        function toggleExpand(node) {
+          const name = node.getAttribute('data-name'); // The name of the node (key or index)
+
+          // Toggle the "expanded" class
+          node.classList.toggle('expanded');
+
+          if (node.classList.contains('expanded')) {
+              // Navigate into the node.
+              fetch('/navigate', {
+                  method: 'POST',
+                  headers: {
+                      'Content-Type': 'application/x-www-form-urlencoded'
+                  },
+                  body: `item_text=${encodeURIComponent(name)}`
+              })
+              .then(response => response.json())
+              .then(data => {
+                  if (data.success) {
+                      renderTree(data.data);
+                      clearErrorMessage();
+                      enableHistoryButtons();
+                  } else {
+                      displayErrorMessage(data.error);
+                  }
+              })
+              .catch(error => {
+                  displayErrorMessage('Error navigating.');
+              });
+            } else {
+              // This means folder is being collapsed, so we go back to the previous directory
+              goBack();
+            }
+        }
+
+        function goBack() {
+            fetch('/back', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    renderTree(data.data);
+                    clearErrorMessage();
+                    enableHistoryButtons();
+                }
+            })
+            .catch(error => {
+                displayErrorMessage('Error going back.');
+            });
+        }
+
+        function goForward() {
+            fetch('/forward', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    renderTree(data.data);
+                    clearErrorMessage();
+                    enableHistoryButtons();
+                }
+            })
+            .catch(error => {
+                displayErrorMessage('Error going forward.');
+            });
+        }
+
+        function displayErrorMessage(message) {
+            const errorMessageDiv = document.getElementById('error-message');
+            errorMessageDiv.textContent = message;
+        }
+
+        function clearErrorMessage() {
+            const errorMessageDiv = document.getElementById('error-message');
+            errorMessageDiv.textContent = '';
+        }
+
+        function enableHistoryButtons() {
+            document.getElementById('backButton').disabled = (historyEnabled && path_history.length > 1 && history_index <= 0);
+            document.getElementById('forwardButton').disabled = (historyEnabled && history_index >= path_history.length - 1);
+        }
+
+
+        // Initial data rendering (if any)
+        {% if data %}
+            renderTree({{ data|tojson }});
+        {% endif %}
+
+        let path_history = [{% if data %}{{data|tojson}}{% endif %}];
+        let history_index = 0;
+    </script>
+
+</body>
+</html>

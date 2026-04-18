@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity Relationship Visualization - Sunburst (Graph to Hierarchy)</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        #chart {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .arc path {
+            stroke: #fff;
+        }
+
+        .arc text {
+            text-anchor: middle;
+        }
+
+        .tooltip {
+            position: absolute;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 5px;
+            border-radius: 3px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+            font-size: 12px;
+            max-width: 300px;
+            z-index: 20;
+        }
+    </style>
+</head>
+<body>
+    <div id="chart"></div>
+    <div class="tooltip" style="display: none;"></div>
+
+    <script>
+        // Initialize variables
+        let width = window.innerWidth;
+        let height = window.innerHeight;
+        let radius = Math.min(width, height) / 2;
+
+        // Color scale
+        const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+        // Partition layout
+        const partition = d3.partition().size([2 * Math.PI, radius]);
+
+        // Arc generator
+        const arc = d3.arc()
+            .startAngle(d => d.x0)
+            .endAngle(d => d.x1)
+            .innerRadius(d => d.y0)
+            .outerRadius(d => d.y1);
+
+        // Create SVG container
+        const svg = d3.select("#chart")
+            .append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .append("g")
+            .attr("transform", `translate(${width / 2},${height / 2})`);
+
+        // Tooltip
+        const tooltip = d3.select(".tooltip");
+
+        // Fetch data
+        fetch('/api/graph')
+            .then(response => response.json())
+            .then(data => {
+                const nodes = data.nodes;
+                const links = data.links;
+
+                // Convert graph data to hierarchical data
+                const hierarchyData = createHierarchy(nodes, links);
+
+                // Process the hierarchy data
+                const root = d3.hierarchy(hierarchyData)
+                    .sum(d => d.value || 1) // Use 1 as default value if node doesn't have a value
+                    .sort((a, b) => b.value - a.value);
+
+                // Compute the layout
+                partition(root);
+
+                // Create arcs
+                const arcElements = svg.append("g")
+                    .selectAll("path")
+                    .data(root.descendants())
+                    .enter().append("path")
+                    .attr("d", arc)
+                    .style("fill", d => {
+                        while (d.depth > 1) d = d.parent;
+                        return color(d.data.name);
+                    })
+                    .style("opacity", 1)
+                    .on("mouseover", handleMouseOver)
+                    .on("mouseout", handleMouseOut);
+
+
+                // Add labels
+                 svg.append("g")
+                    .attr("pointer-events", "none")
+                    .attr("text-anchor", "middle")
+                    .style("user-select", "none")
+                  .selectAll("text")
+                  .data(root.descendants().slice(1))
+                  .join("text")
+                    .attr("dy", "0.35em")
+                    .attr("fill-opacity", d => +labelVisible(d.current))
+                    .attr("transform", d => `translate(${arc.centroid(d.current)})rotate(${getAngle(d)})`)
+                    .text(d => d.data.name);
+
+                function getAngle(d) {
+                   const angle = (180 / Math.PI * (arc.endAngle()(d) + arc.startAngle()(d)) / 2 - 90);
+                   return (angle > 90) ? angle - 180 : angle;
+                }
+
+
+        function labelVisible(d) {
+          return d.y1 <= 3 && d.y0 >= 1 && (d.y1 - d.y0) * (d.x1 - d.x0) > 0.03;
+        }
+
+
+                // Mouse event handlers
+                function handleMouseOver(event, d) {
+                    const tooltipContent = `
+                        <strong>Name:</strong> ${d.data.name}<br>
+                        <strong>Value:</strong> ${d.value}<br>
+                        <strong>Depth:</strong> ${d.depth}
+                    `;
+
+                    tooltip
+                        .html(tooltipContent)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY + 10) + "px")
+                        .style("display", "block");
+                }
+
+                function handleMouseOut(event, d) {
+                    tooltip.style("display", "none");
+                }
+            })
+            .catch(error => console.error('Error fetching graph data:', error));
+
+        // Function to convert graph data to hierarchical data
+        function createHierarchy(nodes, links) {
+            const root = { name: "root", children: [] }; // Create a root node
+
+            // Create a map of node IDs to node objects for easier lookup
+            const nodeMap = new Map(nodes.map(node => [node.id, node]));
+
+            // Build the tree structure
+            links.forEach(link => {
+                const sourceNode = nodeMap.get(link.source);
+                const targetNode = nodeMap.get(link.target);
+
+                if (sourceNode && targetNode) {
+                    // Create a new child object if it doesn't already exist
+                    let child = root.children.find(c => c.name === sourceNode.label);
+                    if (!child) {
+                      child = { name: sourceNode.label, children: [] };
+                      root.children.push(child);
+                    }
+
+                    // Add target node to the children of the source node
+                    child.children.push({ name: targetNode.label });
+
+                 }
+            });
+
+            return root;
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            radius = Math.min(width, height) / 2;
+
+            svg.attr("width", width).attr("height", height)
+                .attr("transform", `translate(${width / 2},${height / 2})`);
+
+            partition.size([2 * Math.PI, radius]);
+
+            d3.selectAll("path")
+                .attr("d", arc);
+        });
+    </script>
+</body>
+</html>

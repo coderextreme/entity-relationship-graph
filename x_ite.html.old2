@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entity Relationship Visualization with X3D (Merged Style)</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/x_ite@11.4.2/dist/x_ite.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    #x3d-canvas {
+       /* Make canvas take full container space */
+      width: 1500px;
+      height: 1000px;
+      background-color: #fff;
+    }
+    .controls {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 180px;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 15px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      z-index: 10;
+    }
+    .tooltip {
+      position: absolute;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+      font-size: 13px;
+      max-width: 300px;
+      z-index: 20;
+      display: none;
+    }
+    #viewpoint-buttons {
+      margin-top: 10px;
+    }
+    button {
+      margin: 3px 0;
+      padding: 6px 12px;
+      cursor: pointer;
+      width: 100%;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background-color: #f5f5f5;
+    }
+    button:hover {
+      background-color: #e0e0e0;
+    }
+    #search-input {
+      width: calc(100% - 10px);
+      padding: 5px;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    #status {
+      font-size: 12px;
+      margin-top: 10px;
+      padding: 5px;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+    }
+    .legend {
+      margin-top: 15px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+      font-size: 12px;
+    }
+    .legend-color {
+      width: 15px;
+      height: 15px;
+      margin-right: 5px;
+      border-radius: 50%;
+      border: 1px solid #bbb; /* Add a border for light colors */
+    }
+     /* Loading/Error Messages */
+    #message {
+        position: absolute;
+        top: 10px;
+        left: 50%; /* Center horizontally */
+        transform: translateX(-50%);
+        padding: 10px 15px;
+        background-color: rgba(255, 255, 0, 0.85);
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        display: none; /* Hidden by default */
+        z-index: 100; /* Ensure it's on top */
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    #message.error {
+        background-color: rgba(255, 0, 0, 0.85);
+        color: white;
+    }
+  </style>
+</head>
+<body>
+  <div id="message">Loading data...</div>
+
+  <div class="controls">
+    <h3 style="margin-top: 0; margin-bottom: 10px;">Graph Controls</h3>
+    <div id="viewpoint-buttons">
+      <button id="reset-view-btn">Reset View</button>
+      <button id="toggle-labels-btn">Toggle Labels</button>
+    </div>
+    <div style="margin-top: 10px;">
+      <label for="search-input">Search Nodes:</label>
+      <input type="text" id="search-input" placeholder="Enter node label">
+      <button id="search-btn">Search</button>
+    </div>
+    <div>
+      <p id="status">Initializing...</p>
+    </div>
+
+    <!-- Updated Legend based on index.html -->
+    <div class="legend">
+      <h4 style="margin-top: 5px; margin-bottom: 8px;">Node Types</h4>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #1f77b4;"></div> <!-- Blue -->
+        <span>Object</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #ff7f0e;"></div> <!-- Orange -->
+        <span>Array</span>
+      </div>
+       <div class="legend-item">
+        <div class="legend-color" style="background-color: #aec7e8;"></div> <!-- Light Blue -->
+        <span>Version</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #2ca02c;"></div> <!-- Green -->
+        <span>String</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #d62728;"></div> <!-- Red -->
+        <span>Number</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #9467bd;"></div> <!-- Purple -->
+        <span>Boolean</span>
+      </div>
+       <div class="legend-item">
+        <div class="legend-color" style="background-color: #8c564b;"></div> <!-- Brown -->
+        <span>Null</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: #7f7f7f;"></div> <!-- Grey -->
+        <span>Other/Default</span>
+      </div>
+    </div>
+  </div>
+
+    <x3d-canvas id="x3d-canvas" touch="true">
+      <X3D profile="Immersive">
+        <Scene id="scene">
+          <Background skyColor="0.97 0.97 0.97"></Background>
+          <Viewpoint id="main-viewpoint"
+                    position="0 0 3000"
+                    orientation="0 0 1 0"
+                    centerOfRotation="0 0 0"
+                    description="Main View"></Viewpoint>
+          <NavigationInfo type='"EXAMINE" "ANY"' headlight="true"></NavigationInfo>
+          <Group id="node-group"></Group>
+          <Group id="link-group"></Group>
+          <Group id="label-group"></Group>
+        </Scene>
+      </X3D>
+    </x3d-canvas>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    // Global variables
+    let showLabels = true;
+    let nodes = [], links = [];
+    let nodeShapes = {}, linkShapes = {}, labelShapes = {};
+    let selectedNodeId = null;
+    let graphData = { nodes: [], links: [] }; // Store raw fetched data if needed
+
+    // DOM element references
+    const messageDiv = document.getElementById('message');
+    const tooltip = document.getElementById('tooltip');
+    const searchInput = document.getElementById('search-input');
+    const statusDisplay = document.getElementById('status');
+    const sceneElement = document.getElementById('scene');
+    const nodeGroup = document.getElementById('node-group');
+    const linkGroup = document.getElementById('link-group');
+    const labelGroup = document.getElementById('label-group');
+
+    // --- Message Handling Functions ---
+    function showMessage(text, isError = false) {
+        messageDiv.textContent = text;
+        messageDiv.className = isError ? 'error' : '';
+        messageDiv.style.display = 'block';
+    }
+
+    function hideMessage() {
+        messageDiv.style.display = 'none';
+    }
+
+    // --- Color Mapping Functions (based on index.html) ---
+    // Returns X3D RGB string "R G B" (values 0-1)
+    function getNodeColor(nodeType) {
+        switch (nodeType) {
+            case 'Object': return '0.12 0.47 0.71'; // #1f77b4 Blue
+            case 'Array': return '1.00 0.50 0.05'; // #ff7f0e Orange
+            case 'Version': return '0.68 0.78 0.91'; // #aec7e8 Light Blue
+            case 'String': return '0.17 0.63 0.17'; // #2ca02c Green
+            case 'Number': return '0.84 0.15 0.16'; // #d62728 Red
+            case 'Boolean': return '0.58 0.40 0.74'; // #9467bd Purple
+            case 'Null': return '0.55 0.34 0.29';   // #8c564b Brown
+            default: return '0.50 0.50 0.50'; // #7f7f7f Grey
+        }
+    }
+
+    function getLinkColor(link) {
+        if (link.specifier_complex) {
+             return '0.61 0.35 0.71'; // #9b59b6 Purple (for complex)
+        }
+        switch (link.spec_type) {
+            case 'Number': return '0.20 0.60 0.86'; // #3498db Blue
+            case 'String': return '0.91 0.30 0.24'; // #e74c3c Red
+            case 'Boolean': return '0.95 0.77 0.06'; // #f1c40f Yellow
+            default: return '0.6 0.6 0.6'; // #999 Grey (Default)
+        }
+    }
+
+    // Initialize X3D scene
+    window.addEventListener('load', function() {
+      const x3dCanvas = document.querySelector('x3d-canvas');
+      if (X3D && x3dCanvas.ready) { // Check if X_ITE is already available and ready
+        initializeScene();
+      } else if (x3dCanvas) {
+        // If not available immediately, wait for it to be ready
+        x3dCanvas.addEventListener('ready', initializeScene, { once: true });
+      } else {
+          showMessage("Could not find X3D canvas element.", true);
+          console.error("Could not find X3D canvas element.");
+      }
+    });
+
+    // Initialize the scene once the browser is ready
+    function initializeScene() {
+      statusDisplay.textContent = "X3D Initialized. Fetching data...";
+      // Set up event listeners
+      document.getElementById('reset-view-btn').addEventListener('click', resetView);
+      document.getElementById('toggle-labels-btn').addEventListener('click', toggleLabels);
+      document.getElementById('search-btn').addEventListener('click', searchNodes);
+      searchInput.addEventListener('keyup', (event) => {
+        if (event.key === 'Enter') searchNodes();
+      });
+
+      // Fetch graph data from server
+      fetchGraphData();
+    }
+
+    // Fetch graph data from API (using logic from index.html)
+    function fetchGraphData() {
+      showMessage("Loading data...");
+      statusDisplay.textContent = "Fetching graph data from server...";
+
+      fetch('/data')
+          .then(response => {
+              if (!response.ok) {
+                  // Try to parse error message from server JSON response
+                  return response.json().then(errData => {
+                       throw new Error(`HTTP error ${response.status}: ${errData.error || response.statusText}`);
+                  }).catch(() => {
+                      // If parsing JSON fails, throw generic error
+                      throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+                  });
+              }
+              return response.json();
+          })
+          .then(data => {
+              hideMessage();
+              if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+                  throw new Error("Invalid data format received from server.");
+              }
+              if (data.nodes.length === 0 && data.links.length === 0) {
+                  showMessage("No data to display. The database might be empty or contain no relationships.", false);
+                  statusDisplay.textContent = "No data to display.";
+                  nodes = [];
+                  links = [];
+                  renderGraph(); // Render empty graph
+                  return; // Stop if no data
+              }
+
+               // Client-side safety check: Ensure links reference valid nodes
+               const nodeIds = new Set(data.nodes.map(n => n.id));
+               const validLinks = data.links.filter(link => {
+                  const sourceExists = nodeIds.has(link.source);
+                  const targetExists = nodeIds.has(link.target);
+                  if (!sourceExists) console.warn(`Link references missing source node ID: ${link.source}`);
+                  if (!targetExists) console.warn(`Link references missing target node ID: ${link.target}`);
+                  return sourceExists && targetExists;
+               });
+
+               if(validLinks.length !== data.links.length) {
+                  console.warn(`${data.links.length - validLinks.length} links were filtered out client-side due to missing nodes.`);
+                  showMessage(`Warning: ${data.links.length - validLinks.length} links were removed because they referenced non-existent nodes.`, false);
+                  // Optionally show message for a few seconds then hide
+                   setTimeout(hideMessage, 5000);
+               }
+
+               // Store data
+               graphData = { nodes: data.nodes, links: validLinks };
+               nodes = graphData.nodes.map(n => ({...n})); // Use shallow copies for simulation/layout
+               links = graphData.links.map(l => ({...l})); // Use shallow copies
+
+              // If nodes don't have x,y,z positions, calculate a layout
+              const hasPositions = nodes.length > 0 && nodes[0].x !== undefined;
+              if (!hasPositions) {
+                statusDisplay.textContent = "Calculating 3D graph layout...";
+                // Use a timeout to allow the UI to update before potentially long calculation
+                setTimeout(() => {
+                    nodes = calculateLayout(nodes, links);
+                    // Scale up the layout
+                    nodes.forEach(node => {
+                        node.x *= 9;
+                        node.y *= 9;
+                        node.z *= 9;
+                    });
+                    renderGraph();
+                    statusDisplay.textContent = `Graph rendered with ${nodes.length} nodes and ${links.length} links.`;
+                }, 50); // Short delay
+              } else {
+                   // If positions exist, maybe still scale them? Assuming they are in a small range initially.
+                   nodes.forEach(node => {
+                        node.x *= 9;
+                        node.y *= 9;
+                        node.z *= 9;
+                    });
+                  renderGraph();
+                  statusDisplay.textContent = `Graph rendered with ${nodes.length} nodes and ${links.length} links.`;
+              }
+          })
+          .catch(error => {
+              console.error('Error fetching or processing graph data:', error);
+              showMessage(`Error: ${error.message}`, true);
+              statusDisplay.textContent = `Error: ${error.message}`;
+          });
+    }
+
+
+    // Force-directed layout calculation (3D)
+    function calculateLayout(nodesToLayout, linksToLayout) {
+        // Simple Fruchterman-Reingold inspired 3D layout
+        const width = 800; // Layout space dimensions
+        const height = 600;
+        const depth = 400;
+        const iterations = 100; // Number of iterations
+        const k = Math.sqrt((width * height * depth) / nodesToLayout.length); // Optimal distance
+        const temp = width / 10; // Initial temperature
+
+        // Initialize random positions within the space
+        nodesToLayout.forEach(node => {
+            if (node.x === undefined || node.y === undefined || node.z === undefined) {
+                 node.x = Math.random() * width - width / 2;
+                 node.y = Math.random() * height - height / 2;
+                 node.z = Math.random() * depth - depth / 2;
+            }
+            node.dx = 0; node.dy = 0; node.dz = 0; // Displacement vectors
+        });
+
+        for (let i = 0; i < iterations; i++) {
+            // Calculate repulsive forces
+            for (let j = 0; j < nodesToLayout.length; j++) {
+                const node1 = nodesToLayout[j];
+                node1.dx = 0; node1.dy = 0; node1.dz = 0;
+                for (let l = 0; l < nodesToLayout.length; l++) {
+                    if (j === l) continue;
+                    const node2 = nodesToLayout[l];
+                    const dx = node1.x - node2.x;
+                    const dy = node1.y - node2.y;
+                    const dz = node1.z - node2.z;
+                    const distSq = dx * dx + dy * dy + dz * dz;
+                    if (distSq > 0) {
+                        const dist = Math.sqrt(distSq);
+                        const repulsiveForce = (k * k) / dist;
+                        node1.dx += (dx / dist) * repulsiveForce;
+                        node1.dy += (dy / dist) * repulsiveForce;
+                        node1.dz += (dz / dist) * repulsiveForce;
+                    }
+                }
+            }
+
+            // Calculate attractive forces
+            linksToLayout.forEach(link => {
+                const source = nodesToLayout.find(n => n.id === link.source);
+                const target = nodesToLayout.find(n => n.id === link.target);
+                if (source && target) {
+                    const dx = target.x - source.x;
+                    const dy = target.y - source.y;
+                    const dz = target.z - source.z;
+                    const distSq = dx * dx + dy * dy + dz * dz;
+                     if (distSq > 0) {
+                        const dist = Math.sqrt(distSq);
+                        const attractiveForce = (dist * dist) / k;
+                        const factor = attractiveForce / dist;
+                        const fx = dx * factor;
+                        const fy = dy * factor;
+                        const fz = dz * factor;
+
+                        source.dx += fx; source.dy += fy; source.dz += fz;
+                        target.dx -= fx; target.dy -= fy; target.dz -= fz;
+                     }
+                }
+            });
+
+            // Limit displacement by temperature and apply
+            nodesToLayout.forEach(node => {
+                const dispMag = Math.sqrt(node.dx * node.dx + node.dy * node.dy + node.dz * node.dz);
+                if (dispMag > 0) {
+                     const factor = Math.min(dispMag, temp) / dispMag;
+                     node.x += node.dx * factor;
+                     node.y += node.dy * factor;
+                     node.z += node.dz * factor;
+                }
+                // Optional: Keep nodes within bounds (simple containment)
+                // node.x = Math.max(-width/2, Math.min(width/2, node.x));
+                // node.y = Math.max(-height/2, Math.min(height/2, node.y));
+                // node.z = Math.max(-depth/2, Math.min(depth/2, node.z));
+            });
+
+            // Cool down temperature (simple linear cooling)
+            // temp *= (1 - i / iterations);
+             // Cool down temperature (alternative cooling)
+             if (temp > 0.1) temp *= 0.99;
+        }
+
+        return nodesToLayout;
+    }
+
+
+    // Render graph nodes and links
+    function renderGraph() {
+      // Clear existing nodes and links from X3D scene
+      while (nodeGroup.firstChild) nodeGroup.removeChild(nodeGroup.firstChild);
+      while (linkGroup.firstChild) linkGroup.removeChild(linkGroup.firstChild);
+      while (labelGroup.firstChild) labelGroup.removeChild(labelGroup.firstChild);
+
+      // Reset internal tracking objects
+      nodeShapes = {};
+      linkShapes = {}; // Note: We are not storing individual link shapes currently
+      labelShapes = {};
+
+      // --- Create Nodes ---
+      nodes.forEach(node => {
+        const nodeTransform = document.createElement('Transform');
+        // Use layout-calculated or provided positions
+        nodeTransform.setAttribute('translation', `${node.x || 0} ${node.y || 0} ${node.z || 0}`);
+        nodeTransform.setAttribute('data-id', node.id); // Store ID for later reference
+
+        const shape = document.createElement('Shape');
+        const appearance = document.createElement('Appearance');
+        const material = document.createElement('Material');
+        material.setAttribute('diffuseColor', getNodeColor(node.type)); // Use new color function
+        // Add specular color for a bit of shine
+        material.setAttribute('specularColor', '0.2 0.2 0.2');
+        material.setAttribute('shininess', '0.2');
+        appearance.appendChild(material);
+
+        const sphere = document.createElement('Sphere');
+        sphere.setAttribute('radius', getNodeRadius(node)); // Use radius function
+
+        shape.appendChild(appearance);
+        shape.appendChild(sphere);
+        nodeTransform.appendChild(shape);
+
+        // Add touch sensor for interaction (clickable)
+        const touchSensor = document.createElement('TouchSensor');
+        touchSensor.setAttribute('description', `Node: ${node.label || node.id}`); // Tooltip hint
+        // Use 'mousedown' or 'touchdown' equivalent for X_ITE interaction
+         touchSensor.addEventListener('isActive', (event) => {
+           if (event.detail.value === true) { // isActive often fires on press and release
+             handleNodeClick(node);
+           }
+         });
+        nodeTransform.appendChild(touchSensor);
+
+        nodeGroup.appendChild(nodeTransform);
+        nodeShapes[node.id] = nodeTransform; // Store reference to the Transform
+
+        // Create label for node (initially potentially hidden)
+        createNodeLabel(node);
+      });
+
+      // --- Create Links ---
+      links.forEach(link => {
+        const sourceNode = nodes.find(n => n.id === link.source);
+        const targetNode = nodes.find(n => n.id === link.target);
+
+        if (sourceNode && targetNode) {
+          const linkTransform = document.createElement('Transform'); // Group for the link line
+          const shape = document.createElement('Shape');
+          const appearance = document.createElement('Appearance');
+          const material = document.createElement('Material');
+          // Use emissiveColor for lines so they are visible without direct light
+          material.setAttribute('emissiveColor', getLinkColor(link)); // Use new link color function
+          appearance.appendChild(material);
+
+          const lineSet = document.createElement('LineSet');
+          lineSet.setAttribute('vertexCount', '2'); // Two points define a line segment
+
+          const coordinates = document.createElement('Coordinate');
+          coordinates.setAttribute('point',
+            `${sourceNode.x || 0} ${sourceNode.y || 0} ${sourceNode.z || 0}, ${targetNode.x || 0} ${targetNode.y || 0} ${targetNode.z || 0}`
+          );
+          lineSet.appendChild(coordinates);
+
+          shape.appendChild(appearance);
+          shape.appendChild(lineSet);
+          linkTransform.appendChild(shape);
+          linkGroup.appendChild(linkTransform);
+
+          // Optionally create link property label
+           if (link.label) { // Check if label exists
+               createLinkLabel(link, sourceNode, targetNode);
+           }
+        }
+      });
+
+      // Update label visibility based on current state
+      toggleLabels(true); // Call toggleLabels to set initial state without toggling
+
+       // Center the view if it's the first render or reset is called
+      // resetView(); // Might be too jarring on initial load, let user explore first.
+       if (!selectedNodeId) { // Only reset if nothing is selected
+           resetView(true); // Pass flag to prevent status message update
+       }
+    }
+
+    // Create node label (Billboarded Text)
+    function createNodeLabel(node) {
+      const labelTransform = document.createElement('Transform');
+      const radius = getNodeRadius(node);
+      const offset = radius + 10; // Position label slightly away from sphere surface
+      labelTransform.setAttribute('translation', `${(node.x || 0) + offset} ${node.y || 0} ${node.z || 0}`);
+      labelTransform.setAttribute('data-node-id', node.id); // Link label to node
+
+      const billboard = document.createElement('Billboard');
+      billboard.setAttribute('axisOfRotation', '0 0 0'); // Face the camera
+
+      const shape = document.createElement('Shape');
+      const appearance = document.createElement('Appearance');
+      const material = document.createElement('Material');
+      material.setAttribute('diffuseColor', '0.1 0.1 0.1'); // Dark text
+      material.setAttribute('emissiveColor', '0.1 0.1 0.1'); // Make text visible
+      appearance.appendChild(material);
+
+      const text = document.createElement('Text');
+       // Show type for containers, value/label for primitives
+       const nodeDisplayLabel = node.type === 'Object' || node.type === 'Array' || node.type === 'Version' ? node.type : (node.label || '');
+      text.setAttribute('string', JSON.stringify([truncateLabel(nodeDisplayLabel)])); // X3D requires array of strings
+      text.setAttribute('solid', 'false'); // Faster rendering for text
+
+      const fontStyle = document.createElement('FontStyle');
+      fontStyle.setAttribute('size', '18'); // Adjust size as needed
+      fontStyle.setAttribute('family', '"SANS"');
+      fontStyle.setAttribute('justify', '"BEGIN" "MIDDLE"'); // Align text
+      text.appendChild(fontStyle);
+
+      shape.appendChild(appearance);
+      shape.appendChild(text);
+      billboard.appendChild(shape);
+      labelTransform.appendChild(billboard);
+
+      // Store label reference and add to scene
+      labelShapes[node.id] = labelTransform;
+      labelGroup.appendChild(labelTransform);
+    }
+
+     // Create link label (Billboarded Text near midpoint)
+     function createLinkLabel(link, source, target) {
+        const midX = ((source.x || 0) + (target.x || 0)) / 2;
+        const midY = ((source.y || 0) + (target.y || 0)) / 2;
+        const midZ = ((source.z || 0) + (target.z || 0)) / 2;
+
+        const labelTransform = document.createElement('Transform');
+        // Offset the label slightly above the midpoint
+        labelTransform.setAttribute('translation', `${midX} ${midY + 12} ${midZ}`);
+        // Store link info if needed later
+        // labelTransform.setAttribute('data-link-source', link.source);
+        // labelTransform.setAttribute('data-link-target', link.target);
+
+        const billboard = document.createElement('Billboard');
+        billboard.setAttribute('axisOfRotation', '0 0 0');
+
+        const shape = document.createElement('Shape');
+        const appearance = document.createElement('Appearance');
+        const material = document.createElement('Material');
+        // Use a slightly different color for link labels
+        material.setAttribute('diffuseColor', '0.3 0.3 0.3');
+        material.setAttribute('emissiveColor', '0.3 0.3 0.3');
+        appearance.appendChild(material);
+
+        const text = document.createElement('Text');
+        text.setAttribute('string', JSON.stringify([truncateLabel(link.label || '', 15)])); // Limit link label length
+        text.setAttribute('solid', 'false');
+
+        const fontStyle = document.createElement('FontStyle');
+        fontStyle.setAttribute('size', '14'); // Smaller font for link labels
+        fontStyle.setAttribute('family', '"SANS"');
+        fontStyle.setAttribute('justify', '"MIDDLE" "MIDDLE"');
+        text.appendChild(fontStyle);
+
+        shape.appendChild(appearance);
+        shape.appendChild(text);
+        billboard.appendChild(shape);
+        labelTransform.appendChild(billboard);
+
+        // Add to scene (labels stored in labelShapes are node labels only for now)
+        labelGroup.appendChild(labelTransform);
+     }
+
+
+    // Get node radius based on type (scaled up from index.html logic)
+    function getNodeRadius(node) {
+      // Adjusted sizes for 3D view
+      switch (node.type) {
+            case 'Object':
+            case 'Array':
+            case 'Version':
+                return 18; // Larger for containers
+            case 'String':
+            case 'Number':
+            case 'Boolean':
+            case 'Null':
+                return 12; // Medium for primitives
+            default:
+                return 10; // Smaller default
+      }
+    }
+
+    // Get node display value (more robust)
+    function getNodeValue(node) {
+       if (node.label !== undefined && node.label !== null) {
+           // Prefer the label provided by the server if it exists
+           return node.label;
+       }
+       // Fallback based on type if no label
+       switch (node.type) {
+           case 'Object': return '(Object)';
+           case 'Array': return '(Array)';
+           case 'Version': return '(Version)';
+           case 'String': return '""'; // Represent empty string
+           case 'Number': return '0';
+           case 'Boolean': return 'false';
+           case 'Null': return 'null';
+           default: return '(Unknown)';
+       }
+    }
+
+
+    // Truncate long label
+    function truncateLabel(label, maxLength = 20) {
+      if (typeof label !== 'string') {
+          label = String(label); // Convert non-strings
+      }
+      return label.length > maxLength ? label.substring(0, maxLength - 3) + '...' : label;
+    }
+
+    // Handle node click/tap
+    function handleNodeClick(node) {
+       if (!node) return;
+
+      // --- Display Tooltip Info ---
+      const tooltipContent = `
+        <strong>ID:</strong> ${node.id}<br>
+        <strong>Type:</strong> ${node.type}<br>
+        <strong>Label:</strong> ${truncateLabel(node.label || 'N/A', 50)}
+        ${node.file ? `<br><strong>Source File:</strong> ${node.file}` : ''}
+      `;
+      tooltip.innerHTML = tooltipContent;
+      tooltip.style.display = 'block';
+      // Position tooltip relative to controls
+      tooltip.style.left = '230px';
+      tooltip.style.top = '20px';
+
+      // --- Highlight Selected and Neighbors (Optional: Simple Highlighting) ---
+      // Reset all node appearances first
+      Object.entries(nodeShapes).forEach(([id, nodeTransform]) => {
+        const material = nodeTransform.querySelector('Material');
+        if (material) {
+          const originalNode = nodes.find(n => n.id == id); // Use == for type coercion if needed
+          if (originalNode) {
+            material.setAttribute('diffuseColor', getNodeColor(originalNode.type));
+            // Reset transparency or other effects if used
+          }
+        }
+      });
+
+      // Highlight the selected node
+      const selectedNodeShape = nodeShapes[node.id];
+      if (selectedNodeShape) {
+        const material = selectedNodeShape.querySelector('Material');
+        if (material) {
+          material.setAttribute('diffuseColor', '1 1 0'); // Bright Yellow highlight
+        }
+      }
+      // Add neighbor highlighting here if desired
+
+      // --- Update State ---
+      selectedNodeId = node.id;
+
+      // --- Focus Camera ---
+      focusOnNode(node);
+
+      // --- Update Status Bar ---
+      statusDisplay.textContent = `Selected: ${node.type} - ${truncateLabel(node.label || node.id, 30)}`;
+    }
+
+    // Focus camera on a specific node
+    function focusOnNode(node) {
+        if (!node || node.x === undefined || node.y === undefined || node.z === undefined) return;
+
+        const viewpoint = document.getElementById('main-viewpoint');
+        if (!viewpoint) return;
+
+        const x3dCanvas = document.querySelector('x3d-canvas');
+        const runtime = x3dCanvas ? x3dCanvas.runtime : null;
+
+        // Calculate a suitable distance based on node size or fixed amount
+        const distance = getNodeRadius(node) * 15 + 100; // Adjust multiplier for desired zoom level
+
+        // Calculate camera position slightly offset and away from the node
+        const camX = node.x;
+        const camY = node.y + distance * 0.2; // Slightly above
+        const camZ = node.z + distance;       // Behind the node (assuming standard view)
+
+        // Smoothly animate viewpoint if runtime is available
+        if (runtime && typeof runtime.animateTo === 'function') {
+             // Define the target viewpoint orientation (usually looking towards negative Z)
+            const targetOrientation = viewpoint.orientation.toString(); // Keep current orientation or set default [0, 0, 1, 0] ?
+            const targetPosition = `${camX} ${camY} ${camZ}`;
+
+             // Create a temporary viewpoint definition string or object
+             // X_ITE might use a specific format - check its documentation if needed
+             const viewDef = `Viewpoint { position ${targetPosition} orientation ${targetOrientation} centerOfRotation ${node.x} ${node.y} ${node.z} }`;
+
+             // Find the viewpoint node within the browser object
+              const scene = X3D.findNode(sceneElement); // Get the Scene node wrapper
+              const vp = scene.getField("children").getValue().find(node => node.getNodeName() === "Viewpoint" && node.getAttribute("id") === "main-viewpoint");
+
+              if (vp) {
+                   // Set centerOfRotation FIRST for better animation focus
+                   vp.setAttribute("centerOfRotation", `${node.x} ${node.y} ${node.z}`);
+                    // Animate position and orientation
+                    runtime.animateTo(vp, viewDef, 1.5); // Animate over 1.5 seconds
+              } else {
+                   // Fallback: Instant jump if animation setup fails
+                   viewpoint.setAttribute('position', targetPosition);
+                   viewpoint.setAttribute('centerOfRotation', `${node.x} ${node.y} ${node.z}`);
+              }
+
+        } else {
+            // Fallback: Instant jump if runtime or animateTo is not available
+            viewpoint.setAttribute('position', `${camX} ${camY} ${camZ}`);
+            viewpoint.setAttribute('centerOfRotation', `${node.x} ${node.y} ${node.z}`);
+        }
+    }
+
+    // Toggle labels visibility
+    function toggleLabels(setStateOnly = false) { // Add flag to prevent toggling logic if just setting initial state
+        if (!setStateOnly) {
+            showLabels = !showLabels;
+        }
+
+        const scaleValue = showLabels ? '1 1 1' : '0 0 0'; // Use scale to hide/show
+
+        // Toggle visibility of all node and link labels in the label group
+        const labelElements = labelGroup.querySelectorAll('Transform');
+        labelElements.forEach(labelTransform => {
+            labelTransform.setAttribute('scale', scaleValue);
+        });
+
+        if (!setStateOnly) {
+            statusDisplay.textContent = `Labels ${showLabels ? 'shown' : 'hidden'}`;
+        }
+        // Update button text maybe?
+        document.getElementById('toggle-labels-btn').textContent = showLabels ? 'Hide Labels' : 'Show Labels';
+    }
+
+    // Search for nodes by label
+    function searchNodes() {
+      const searchTerm = searchInput.value.trim().toLowerCase();
+      tooltip.style.display = 'none'; // Hide tooltip during search
+
+      if (!searchTerm) {
+        statusDisplay.textContent = "Enter text to search for in node labels.";
+        return;
+      }
+
+      const matchingNodes = nodes.filter(node =>
+        node.label && typeof node.label === 'string' && node.label.toLowerCase().includes(searchTerm)
+      );
+
+      if (matchingNodes.length === 0) {
+        statusDisplay.textContent = `No nodes found matching "${searchTerm}"`;
+        // Maybe reset highlight?
+        selectedNodeId = null; // Clear selection if nothing found
+         // Reset all node appearances
+         Object.entries(nodeShapes).forEach(([id, nodeTransform]) => {
+            const material = nodeTransform.querySelector('Material');
+            if (material) {
+            const originalNode = nodes.find(n => n.id == id);
+            if (originalNode) {
+                material.setAttribute('diffuseColor', getNodeColor(originalNode.type));
+            }
+            }
+        });
+        return;
+      }
+
+      // Select and focus the first matching node
+      handleNodeClick(matchingNodes[0]);
+      statusDisplay.textContent = `Found ${matchingNodes.length} node(s) matching "${searchTerm}". Focused on first match.`;
+    }
+
+    // Reset view to initial state
+    function resetView(silent = false) { // Add silent flag to suppress status update
+      const viewpoint = document.getElementById('main-viewpoint');
+      if (!viewpoint) return;
+
+      viewpoint.setAttribute('position', '0 0 3000'); // Default position
+      viewpoint.setAttribute('orientation', '0 0 1 0'); // Default orientation
+      viewpoint.setAttribute('centerOfRotation', '0 0 0'); // Default center
+
+       // Clear selection highlight if a node was selected
+       if (selectedNodeId !== null) {
+            const nodeShape = nodeShapes[selectedNodeId];
+            if (nodeShape) {
+                const material = nodeShape.querySelector('Material');
+                const nodeObj = nodes.find(n => n.id === selectedNodeId);
+                if (material && nodeObj) {
+                    material.setAttribute('diffuseColor', getNodeColor(nodeObj.type));
+                }
+            }
+            selectedNodeId = null;
+       }
+
+      // Hide tooltip
+      tooltip.style.display = 'none';
+
+      if (!silent) {
+          statusDisplay.textContent = 'View reset. Use mouse/touch to navigate.';
+      }
+    }
+
+  </script>
+</body>
+</html>

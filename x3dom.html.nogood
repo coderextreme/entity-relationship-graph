@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entity Relationship Visualization with X3DOM</title>
+  <script defer src="https://www.x3dom.org/download/x3dom.js"></script>
+  <link rel="stylesheet" href="https://www.x3dom.org/download/x3dom.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center; /* Center horizontally */
+      min-height: 100vh; /* Ensure full height */
+    }
+
+    #x3d-canvas-container {
+      width: 90%; /* Responsive width */
+      max-width: 1500px; /* Maximum width */
+      height: 60vh; /* Responsive height, adjust as needed */
+      max-height: 1000px; /* Maximum height */
+      border: 1px solid #ccc;
+      margin-top: 20px; /* Add some top margin */
+      position: relative; /* For absolute positioning of controls */
+    }
+
+    #x3d-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      background-color: #f8f8f8;
+    }
+
+    .controls {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 180px;
+      background-color: rgba(255, 255, 255, 0.95);
+      padding: 15px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      z-index: 10;
+      max-height: calc(100% - 40px);
+      overflow-y: auto;
+    }
+
+    .tooltip {
+      position: absolute;
+      top: 10px;
+      left: 210px;
+      background-color: rgba(245, 245, 245, 0.95);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+      font-size: 13px;
+      max-width: 300px;
+      z-index: 20;
+      display: none;
+      border: 1px solid #ddd;
+    }
+
+    #viewpoint-buttons {
+      margin-top: 10px;
+    }
+
+    button {
+      margin: 3px 0;
+      padding: 6px 12px;
+      cursor: pointer;
+      width: 100%;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background-color: #f5f5f5;
+      transition: background-color 0.2s ease;
+    }
+
+    button:hover {
+      background-color: #e0e0e0;
+    }
+
+    #search-input {
+      width: calc(100% - 12px);
+      padding: 5px;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+
+    #status {
+      font-size: 12px;
+      margin-top: 10px;
+      padding: 5px;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+      word-wrap: break-word;
+    }
+
+    .legend {
+      margin-top: 15px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+      font-size: 12px;
+    }
+
+    .legend-color {
+      width: 15px;
+      height: 15px;
+      margin-right: 5px;
+      border-radius: 50%;
+      border: 1px solid #bbb;
+      flex-shrink: 0;
+    }
+
+    #message {
+        position: absolute;
+        top: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 15px;
+        background-color: rgba(255, 255, 0, 0.85);
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        display: none;
+        z-index: 100;
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        max-width: 80%;
+    }
+
+    #message.error {
+        background-color: rgba(220, 53, 69, 0.9);
+        color: white;
+        border-color: #dc3545;
+    }
+
+    #message.success {
+        background-color: rgba(40, 167, 69, 0.9);
+        color: white;
+        border-color: #28a745;
+    }
+
+    #message.warning {
+        background-color: rgba(255, 193, 7, 0.9);
+        color: #212529;
+        border-color: #ffc107;
+    }
+    main {
+        width: 95%;
+        max-width: 1600px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="message">Loading script...</div>
+  <main>
+
+  <div id="x3d-canvas-container">
+      <!-- Use x3d element for X3DOM -->
+      <x3d id="x3d-canvas">
+        <scene id="scene">
+          <Background skyColor="0.97 0.97 0.97"></Background>
+          <Viewpoint id="main-viewpoint"
+                    position="0 0 3000"
+                    orientation="0 0 1 0"
+                    centerOfRotation="0 0 0"
+                    description="Main View"></Viewpoint>
+          <NavigationInfo type='"EXAMINE" "ANY"' headlight="true"></NavigationInfo>
+          <Group id="node-group"></Group>
+          <Group id="link-group"></Group>
+          <Group id="label-group"></Group>
+        </scene>
+      </x3d>
+
+      <div class="controls">
+        <h3 style="margin-top: 0; margin-bottom: 10px;">Graph Controls</h3>
+        <div id="viewpoint-buttons">
+          <button id="reset-view-btn">Reset View</button>
+          <button id="toggle-labels-btn">Toggle Labels</button>
+        </div>
+        <div style="margin-top: 10px;">
+          <label for="search-input">Search Nodes:</label>
+          <input type="text" id="search-input" placeholder="Enter node label">
+          <button id="search-btn">Search</button>
+        </div>
+        <div>
+          <p id="status">Waiting for X3DOM...</p>
+        </div>
+
+        <!-- Legend -->
+        <div class="legend">
+          <h4 style="margin-top: 5px; margin-bottom: 8px;">Node Types</h4>
+          <div class="legend-item"><div class="legend-color" style="background-color: #1f77b4;"></div><span>Object</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #ff7f0e;"></div><span>Array</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #aec7e8;"></div><span>Version</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #2ca02c;"></div><span>String</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #d62728;"></div><span>Number</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #9467bd;"></div><span>Boolean</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #8c564b;"></div><span>Null</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #7f7f7f;"></div><span>Other/Default</span></div>
+        </div>
+      </div>
+
+      <div class="tooltip" id="tooltip"></div>
+  </div>
+  </main>
+
+  <script>
+    // Global variables
+    let showLabels = true;
+    let nodes = [], links = [];
+    let nodeShapes = {}, labelShapes = {};
+    let selectedNodeId = null;
+    let graphData = { nodes: [], links: [] };
+
+    // DOM element references
+    const messageDiv = document.getElementById('message');
+    const tooltip = document.getElementById('tooltip');
+    const searchInput = document.getElementById('search-input');
+    const statusDisplay = document.getElementById('status');
+    const x3dCanvas = document.getElementById('x3d-canvas');
+    const sceneElement = document.getElementById('scene');
+    const nodeGroup = document.getElementById('node-group');
+    const linkGroup = document.getElementById('link-group');
+    const labelGroup = document.getElementById('label-group');
+
+    // --- Message Handling Functions ---
+    function showMessage(text, type = 'info', duration = 0) {
+        console.log(`showMessage (${type}):`, text);
+        messageDiv.textContent = text;
+        messageDiv.className = type;
+        messageDiv.style.display = 'block';
+        if (duration > 0) {
+            setTimeout(hideMessage, duration);
+        }
+    }
+    function hideMessage() {
+        messageDiv.style.display = 'none';
+    }
+
+    // --- Color Mapping Functions ---
+    function getNodeColor(nodeType) {
+        switch (nodeType) {
+            case 'Object': return '0.12 0.47 0.71';
+            case 'Array': return '1.00 0.50 0.05';
+            case 'Version': return '0.68 0.78 0.91';
+            case 'String': return '0.17 0.63 0.17';
+            case 'Number': return '0.84 0.15 0.16';
+            case 'Boolean': return '0.58 0.40 0.74';
+            case 'Null': return '0.55 0.34 0.29';
+            default: return '0.50 0.50 0.50';
+        }
+    }
+
+    function getLinkColor(link) {
+        if (link.specifier_complex) {
+             return '0.61 0.35 0.71';
+        }
+        switch (link.spec_type) {
+            case 'Number': return '0.20 0.60 0.86';
+            case 'String': return '0.91 0.30 0.24';
+            case 'Boolean': return '0.95 0.77 0.06';
+            default: return '0.6 0.6 0.6';
+        }
+    }
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log("DOM Content Loaded. Waiting for X3DOM...");
+        showMessage("Loading X3DOM library...", 'info');
+        statusDisplay.textContent = "Loading X3DOM...";
+
+        // X3DOM doesn't have a 'ready' event, so we'll just proceed after a short delay
+        setTimeout(initializeScene, 500);
+    });
+
+    // Initialize the scene once X3DOM is likely ready
+    function initializeScene() {
+      console.log("Assuming X3DOM is ready. Initializing Scene...");
+      statusDisplay.textContent = "X3DOM Initialized.";
+      showMessage("X3DOM Initialized.", 'success', 2000);
+
+      // Set up event listeners for controls
+      try {
+          document.getElementById('reset-view-btn').addEventListener('click', resetView);
+          document.getElementById('toggle-labels-btn').addEventListener('click', toggleLabels);
+          document.getElementById('search-btn').addEventListener('click', searchNodes);
+          searchInput.addEventListener('keyup', (event) => {
+            if (event.key === 'Enter') searchNodes();
+          });
+          console.log("Control event listeners added.");
+      } catch (error) {
+          console.error("Error setting up control listeners:", error);
+          showMessage("Error initializing controls. See console.", 'error');
+          statusDisplay.textContent = "Error: Controls init failed.";
+          return;
+      }
+
+      // Fetch graph data
+      fetchGraphData();
+    }
+
+    // Fetch graph data from API
+    function fetchGraphData() {
+      console.log("Fetching graph data from /data...");
+      showMessage("Loading graph data...", 'info');
+      statusDisplay.textContent = "Fetching graph data...";
+
+      fetch('/data')
+          .then(response => {
+              console.log("Fetch response received, status:", response.status);
+              if (!response.ok) {
+                  return response.json().then(errData => {
+                      const errorMsg = `Server error ${response.status}: ${errData.error || response.statusText}`;
+                      console.error(errorMsg, errData);
+                      throw new Error(errorMsg);
+                  }).catch((parseError) => {
+                      const errorMsg = `HTTP error ${response.status}: ${response.statusText}. Failed to parse error details.`;
+                      console.error(errorMsg, parseError);
+                      throw new Error(errorMsg);
+                  });
+              }
+              return response.json();
+          })
+          .then(data => {
+              console.log("Graph data received:", data);
+              if (!data || typeof data !== 'object') { throw new Error("Invalid data format: Response is not an object."); }
+              if (!Array.isArray(data.nodes) || !Array.isArray(data.links)) { throw new Error("Invalid data format: Missing 'nodes' or 'links' array."); }
+
+              if (data.nodes.length === 0 && data.links.length === 0) {
+                  showMessage("No data to display.", 'warning', 5000);
+                  statusDisplay.textContent = "No data to display.";
+                  return;
+              }
+
+              graphData = data;
+              nodes = graphData.nodes;
+              links = graphData.links;
+
+              console.log(`Processing ${nodes.length} nodes and ${links.length} links.`);
+
+              try {
+                  renderGraph(); // Render graph data into X3DOM scene
+              } catch (renderError) {
+                  console.error("Error during renderGraph:", renderError);
+                  showMessage(`Error during renderGraph: ${renderError.message}`, 'error');
+                  statusDisplay.textContent = "Error: RenderGraph failed.";
+              }
+
+          })
+          .catch(error => {
+              console.error('Error fetching or processing graph data:', error);
+              showMessage(`Error loading data: ${error.message}`, 'error');
+              statusDisplay.textContent = `Error: ${error.message}`;
+          });
+    }
+
+    // Force-directed layout calculation (3D)
+    function calculateLayout(nodesToLayout, linksToLayout) {
+        console.log("Starting layout calculation...");
+        if (!nodesToLayout || nodesToLayout.length === 0) { return []; }
+        const width = 10, height = 10, depth = 10, iterations = 100;
+        const k = nodesToLayout.length > 0 ? Math.sqrt((width * height * depth) / nodesToLayout.length) : 100;
+        let temp = width / 10;
+        const nodeMap = new Map(nodesToLayout.map(node => [node.id, node]));
+
+        nodesToLayout.forEach(node => {
+            //Set random only if they are no values.
+            if (isNaN(node.x)) {
+                 node.x = Math.random() * width - width / 2;
+            }
+            //Set random only if they are no values.
+            if (isNaN(node.y)) {
+                node.y = Math.random() * height - height / 2;
+            }
+             //Set random only if they are no values.
+            if (isNaN(node.z)) {
+                 node.z = Math.random() * depth - depth / 2;
+            }
+            node.dx = 0; node.dy = 0; node.dz = 0;
+        });
+        for (let i = 0; i < iterations; i++) {
+            // Repulsive forces
+            for (let j = 0; j < nodesToLayout.length; j++) {
+                const node1 = nodesToLayout[j];
+                node1.dx = 0; node1.dy = 0; node1.dz = 0;
+                for (let l = 0; l < nodesToLayout.length; l++) {
+                    if (j === l) continue;
+                    const node2 = nodesToLayout[l];
+                    const dx = node1.x - node2.x, dy = node1.y - node2.y, dz = node1.z - node2.z;
+                    const distSq = (dx * dx + dy * dy + dz * dz) || 1e-6;
+                    const dist = Math.sqrt(distSq);
+                    const repulsiveForce = (k * k) / dist;
+                    const factor = repulsiveForce / dist;
+                    node1.dx += dx * factor; node1.dy += dy * factor; node1.dz += dz * factor;
+                }
+            }
+            // Attractive forces
+            linksToLayout.forEach(link => {
+                const source = nodeMap.get(link.source), target = nodeMap.get(link.target);
+                if (source && target) {
+                    const dx = target.x - source.x, dy = target.y - source.y, dz = target.z - source.z;
+                    const distSq = (dx * dx + dy * dy + dz * dz) || 1e-6;
+                    const dist = Math.sqrt(distSq);
+                    const attractiveForce = (dist * dist) / k;
+                    const factor = attractiveForce / dist;
+                    const fx = dx * factor, fy = dy * factor, fz = dz * factor;
+                    source.dx = (source.dx || 0) + fx; source.dy = (source.dy || 0) + fy; source.dz = (source.dz || 0) + fz;
+                    target.dx = (target.dx || 0) - fx; target.dy = (target.dy || 0) - fy; target.dz = (target.dz || 0) - fz;
+                }
+            });
+            // Apply displacement
+            nodesToLayout.forEach(node => {
+                 const dispMagSq = (node.dx * node.dx + node.dy * node.dy + node.dz * node.dz) || 0;
+                 if (dispMagSq > 0) {
+                    const dispMag = Math.sqrt(dispMagSq);
+                    const limitedDispMag = Math.min(dispMag, temp);
+                    const factor = limitedDispMag / dispMag;
+                    node.x += node.dx * factor; node.y += node.dy * factor; node.z += node.dz * factor;
+                 }
+            });
+            if (temp > 0.1) temp *= 0.99;
+        }
+        console.log("Layout calculation finished.");
+        return nodesToLayout;
+    }
+
+    // Render graph nodes and links into the X3DOM scene
+   function renderGraph() {
+       console.log("Rendering graph into X3DOM scene...");
+       statusDisplay.textContent = "Rendering graph...";
+
+       // Clear existing nodes, links, and labels
+       clearScene();
+
+       // Reset internal tracking objects
+       nodeShapes = {};
+       labelShapes = {};
+
+       nodes = graphData.nodes; // Get the value from the graph
+       links = graphData.links // Get the links too
+        const hasPositions = nodes && nodes.length > 0 && nodes[0].x !== undefined && nodes[0].y !== undefined && nodes[0].z !== undefined;
+       const needsLayout = nodes && nodes.length > 0 && !hasPositions;
+
+       if (needsLayout) {
+            showMessage("Nodes lack positions, calculating layout", "info");
+            // Run calculation
+            let calculated;
+            try {
+                calculated = calculateLayout(nodes, links);
+            } catch (layoutError) {
+                 console.error("Error in calculate layout");
+                 showMessage("Error during calculateLayout: " + layoutError);
+                 return;
+            }
+
+             graphData.nodes = calculated;
+            console.log("Layout calculated, start to render to scene.");
+        }
+// Get node element
+       const nodeGroup = document.getElementById('node-group');
+       const linkGroup = document.getElementById('link-group');
+       const labelGroup = document.getElementById('label-group');
+
+       //Set all components to start
+
+       if (!nodeGroup) {
+           showMessage("Missing <Group id='node-group'> element in scene!", 'error', 5000);
+           statusDisplay.textContent = "Error: Missing node group.";
+           console.error("Missing <Group id='node-group'> element in scene!");
+           return; // Stop rendering if nodeGroup is missing
+       }
+        if (!linkGroup) {
+            showMessage("Missing <Group id='link-group'> element in scene!", 'error', 5000);
+            statusDisplay.textContent = "Error: Missing link group.";
+            console.error("Missing <Group id='link-group'> element in scene!");
+            return; // Stop rendering if linkGroup is missing
+        }
+
+       if (!labelGroup) {
+           showMessage("Missing <Group id='label-group'> element in scene!", 'error', 5000);
+           statusDisplay.textContent = "Error: Missing label group.";
+           console.error("Missing <Group id='label-group'> element in scene!");
+           return; // Stop rendering if labelGroup is missing
+       }
+
+
+         // Scale the layout before rendering
+          const scaleDownFactor = 0.05;
+
+           //set the values of the graphs with a loop for
+           if (graphData.nodes) {
+            for (let i = 0; i < graphData.nodes.length; i++) {
+                const node = graphData.nodes[i]
+
+                   //Validate of null
+
+                const x = (node.x !== null && !isNaN(node.x) ) ? (node.x   * scaleDownFactor) : 0;
+                const y = (node.y !== null && !isNaN(node.y) ) ? (node.y   * scaleDownFactor) : 0;
+                const z = (node.z !== null && !isNaN(node.z)) ? (node.z   * scaleDownFactor) : 0;
+                     // update the node with the new cords.
+                    graphData.nodes[i].x  =x;
+                    graphData.nodes[i].y =y;
+                    graphData.nodes[i].z =z;
+                }
+
+            }
+            scaleCamera()
+
+            //add to addNode for x3dom
+           if (nodes) graphData.nodes.forEach(node => {
+                addNode(node, nodeGroup)
+                addNodeLabel(node, labelGroup);
+
+            });
+            //Validate cord of links
+        if (graphData.links) graphData.links.forEach(link => {
+                addLink(link, linkGroup);
+                addLinkLabel(link, labelGroup); // Add link labels
+            });
+
+		/*
+            // Adding relationships from arrays to their elements and from objects to their property values.
+            graphData.nodes.forEach(parentNode => {
+                if (parentNode.type === 'Array' || parentNode.type === 'Object') {
+                    if (parentNode.children && Array.isArray(parentNode.children)) {
+                        parentNode.children.forEach(childId => {
+                            const childNode = graphData.nodes.find(n => n.id === childId);
+                            if (childNode) {
+                                // Check if the link already exists to prevent duplicates
+                                const linkExists = graphData.links.some(link =>
+                                    (link.source === parentNode.id && link.target === childNode.id)
+                                );
+
+                                if (!linkExists) {
+                                    const newLink = {
+                                        source: parentNode.id,
+                                        target: childNode.id,
+                                        spec_type: typeof childId, // Use typeof childId as spec_type
+                                        label: childId.toString()  //Use childID in the labels for this one.
+                                    };
+                                    graphData.links.push(newLink);
+                                    addLink(newLink, linkGroup); // Render the new link
+                                    addLinkLabel(newLink, labelGroup); //Add new label
+                                }
+                            }
+                        });
+                    }
+                }
+            });
+		*/
+
+         scaleCamera()
+    }
+         //Function that creates x3d
+         // Add a function to create the links to the layout
+        function addLink(link, linkGroup) {
+            try {
+                const sourceNode = nodes.find(node => node.id === link.source);
+                const targetNode = nodes.find(node => node.id === link.target);
+                 if (!sourceNode || !targetNode) {
+                    console.warn(`Skipping link ${link.source}->${link.target}: Missing node(s)`);
+                    return;
+                 }
+                //Setting of all element
+                const material = document.createElement('Material');
+                material.setAttribute('emissiveColor', getLinkColor(link));
+                 const lineSet = document.createElement('LineSet');
+                lineSet.setAttribute('solid', 'false');
+                const coords = document.createElement('Coordinate');
+                   coords.setAttribute('point', `${sourceNode.x} ${sourceNode.y} ${sourceNode.z}, ${targetNode.x} ${targetNode.y} ${targetNode.z}`);
+                lineSet.appendChild(coords);
+                 const shape = document.createElement('Shape');
+                shape.setAttribute('containerField', 'children');
+                shape.appendChild(material);
+                shape.appendChild(lineSet);
+
+                 linkGroup.appendChild(shape);
+            } catch (error) {
+                console.error(`Error creating link: ${link.source} -> ${link.target}`, error);
+                 showMessage(`Error during node render: ${link.source}.`, 'error', 5000);
+             }
+         }
+           function addNode(node, nodeGroup) {
+           try {
+               const x = node.x || 0;
+               const y = node.y || 0;
+               const z = node.z || 0;
+
+                //Log before creating
+                 const nodeTransform = document.createElement('Transform');
+                nodeTransform.setAttribute('translation', `${x} ${y} ${z}`);
+                 const shape = document.createElement('Shape');
+                const appearance = document.createElement('Appearance');
+                const material = document.createElement('Material');
+                material.setAttribute('diffuseColor', getNodeColor(node.type));
+                 appearance.appendChild(material);
+                shape.appendChild(appearance);
+
+                const sphere = document.createElement('Sphere');
+                //Set the radius with a fallback
+                 sphere.setAttribute('radius', String(getNodeRadius(node)));
+                sphere.setAttribute('subdivision', '12,12');
+                sphere.setAttribute('solid', "false");
+                 shape.setAttribute('containerField', 'children');
+                  nodeTransform.setAttribute('containerField', 'children');
+                shape.appendChild(appearance);
+                 shape.appendChild(sphere);
+                 nodeTransform.appendChild(shape);
+                nodeGroup.appendChild(nodeTransform);
+         } catch (renderError) {
+            showMessage(`Error during node render: ${node.id}.`, 'error', 5000);
+            console.error("Error in rendering node element inside", renderError)
+        }
+    }
+
+      function addNodeLabel(node, labelGroup) {
+        try {
+            const x = node.x || 0;
+            const y = node.y || 0;
+            const z = node.z || 0;
+
+            const labelTransform = document.createElement('Transform');
+            labelTransform.setAttribute('translation', `${x} ${y + 0.1} ${z}`); // Offset label slightly above the node
+            labelTransform.setAttribute('scale', '0.05 0.05 0.05'); // Adjust the size of the label
+
+            // Add Billboard node to always face the camera
+            const billboard = document.createElement('Billboard');
+            billboard.setAttribute('axisOfRotation', '0 0 0'); // Rotate around all axes
+
+            const shape = document.createElement('Shape');
+            const appearance = document.createElement('Appearance');
+            const material = document.createElement('Material');
+            material.setAttribute('diffuseColor', '0 0 0'); // Black color for the label
+            appearance.appendChild(material);
+            shape.appendChild(appearance);
+
+            const text = document.createElement('Text');
+            text.setAttribute('string', `"${node.label || node.id}"`); // Use node.label as the label, fallback to node.id
+            text.setAttribute('solid', 'false');
+
+            const fontStyle = document.createElement('FontStyle');
+            fontStyle.setAttribute('size', '1');
+            fontStyle.setAttribute('family', '"Arial, sans-serif"');
+            text.appendChild(fontStyle);
+
+            shape.appendChild(text);
+            billboard.appendChild(shape); // Append shape to billboard
+            labelTransform.appendChild(billboard); // Append billboard to labelTransform
+            labelGroup.appendChild(labelTransform);
+
+        } catch (renderError) {
+            showMessage(`Error during label render: ${node.id}.`, 'error', 5000);
+            console.error("Error in rendering label element", renderError);
+        }
+    }
+
+      function addLinkLabel(link, labelGroup) {
+        try {
+            const sourceNode = nodes.find(node => node.id === link.source);
+            const targetNode = nodes.find(node => node.id === link.target);
+
+            if (!sourceNode || !targetNode) {
+                console.warn(`Skipping link label ${link.source}->${link.target}: Missing node(s)`);
+                return;
+            }
+
+            const midX = (sourceNode.x + targetNode.x) / 2;
+            const midY = (sourceNode.y + targetNode.y) / 2;
+            const midZ = (sourceNode.z + targetNode.z) / 2;
+
+            const labelTransform = document.createElement('Transform');
+            labelTransform.setAttribute('translation', `${midX} ${midY + 0.1} ${midZ}`); // Position at midpoint
+            labelTransform.setAttribute('scale', '0.03 0.03 0.03'); // Adjust label size
+
+            // Add Billboard node to always face the camera
+            const billboard = document.createElement('Billboard');
+            billboard.setAttribute('axisOfRotation', '0 0 0'); // Rotate around all axes
+
+
+            const shape = document.createElement('Shape');
+            const appearance = document.createElement('Appearance');
+            const material = document.createElement('Material');
+            material.setAttribute('diffuseColor', '0 0 0'); // Black color
+            appearance.appendChild(material);
+            shape.appendChild(appearance);
+
+            const text = document.createElement('Text');
+            text.setAttribute('string', `"${link.label || link.spec_type}"`); // Use link.label as label or fallback to link.spec_type
+            text.setAttribute('solid', 'false');
+
+            const fontStyle = document.createElement('FontStyle');
+            fontStyle.setAttribute('size', '1');
+            fontStyle.setAttribute('family', '"Arial, sans-serif"');
+            text.appendChild(fontStyle);
+
+            shape.appendChild(text);
+            billboard.appendChild(shape);
+            labelTransform.appendChild(billboard);
+            labelGroup.appendChild(labelTransform);
+
+        } catch (renderError) {
+            showMessage(`Error during link label render: ${link.source}->${link.target}.`, 'error', 5000);
+            console.error("Error in rendering link label element", renderError);
+        }
+    }
+
+
+     function scaleCamera() {
+        let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+        const scaleAllNodes = 4;
+
+        if (nodes && nodes.length > 0) {
+            //set All Nodes values.
+            for (let i = 0; i < nodes.length; i++) {
+                const node = nodes[i];
+
+                //  nodes[i].x=( (node.x /scaleAllNodes))
+                //  nodes[i].y=( (node.y /scaleAllNodes))
+                //   nodes[i].z= ( (node.z/scaleAllNodes))
+            }
+
+            nodes.forEach(node => {
+                const x = node.x || 0;
+                const y = node.y || 0;
+                const z = node.z || 0;
+                // Update min/max
+                xMin = Math.min(xMin, x);
+                xMax = Math.max(xMax, x);
+                yMin = Math.min(yMin, y);
+                yMax = Math.max(yMax, y);
+                zMin = Math.min(zMin, z);
+                zMax = Math.max(zMax, z);
+                //    viewPortLogText = [node.id,xMin,xMax,yMin,yMax,zMin,zMax]
+                console.log("The scale is:" + xMin + xMax + yMin + yMax + zMin + zMax)
+	});
+    }
+
+// Calculate center and range
+  const xRange = xMax - xMin;
+  const yRange = yMax - yMin;
+  const zRange = zMax - zMin;
+  const xCenter = (xMax + xMin) / 2;
+  const yCenter = (yMax + yMin) / 2;
+  const zCenter = (zMax + zMin) / 2;
+
+  // Use the maximum range to calculate the appropriate distance
+  const maxRange = Math.max(xRange, yRange, zRange);
+  const distance = maxRange / Math.tan(Math.PI / 6); // FOV is 30 degrees (PI/6)
+   console.log("ViewPort new positions: "+xCenter, yCenter,distance)
+  // Update the viewpoint
+  const viewpoint = document.getElementById('main-viewpoint');
+   if (viewpoint) {
+       viewpoint.setAttribute('position', `${xCenter} ${yCenter} ${distance * 2}`);
+       viewpoint.setAttribute('centerOfRotation', `${xCenter} ${yCenter} ${zCenter}`);
+  } else {
+      console.warn("main-viewpoint not found!");
+  }
+}
+
+function clearScene() {
+	console.log("Clearing X3DOM scene...");
+	const nodeGroup = document.getElementById('node-group');
+	const linkGroup = document.getElementById('link-group');
+	const labelGroup = document.getElementById('label-group');
+
+	if (nodeGroup) {
+	      while (nodeGroup.firstChild) {
+		  nodeGroup.removeChild(nodeGroup.firstChild);
+	      }
+	  }
+	  if (linkGroup) {
+	      while (linkGroup.firstChild) {
+		  linkGroup.removeChild(linkGroup.firstChild);
+	      }
+	  }
+	  if (labelGroup) {
+	      while (labelGroup.firstChild) {
+		  labelGroup.removeChild(labelGroup.firstChild);
+	      }
+	  }
+}
+
+// Color functions
+function getNodeColor(nodeType) {
+	switch (nodeType) {
+	case 'Object': return '0.12 0.47 0.71';
+	case 'Array': return '1.00 0.50 0.05';
+	case 'Version': return '0.68 0.78 0.91';
+	case 'String': return '0.17 0.63 0.17';
+	case 'Number': return '0.84 0.15 0.16';
+	case 'Boolean': return '0.58 0.40 0.74';
+	case 'Null': return '0.55 0.34 0.29';
+	default: return '0.50 0.50 0.50';
+	}
+}
+function getNodeRadius(node) {
+	switch (node.type) {
+	case 'Object':
+	case 'Array':
+	case 'Version':
+	return 0.05; //Make them more smaller
+	case 'String':
+	case 'Number':
+	case 'Boolean':
+	case 'Null':
+	return 0.04;
+	default:
+	return 0.03;
+	}
+}
+
+function resetView() {
+	scaleCamera()
+}
+
+// All the Label functions
+function setLabelVisibility(visible) {
+	console.log("Set label visibility in X3DOM scene...")
+	const labelGroup = document.getElementById('label-group');
+	if (labelGroup) {
+	labelGroup.setAttribute('render', visible.toString()); // X3DOM render attribute controls visibility.
+	labelGroup.setAttribute('enabled', visible.toString()); // X3DOM enabled attribute controls visibility.
+	}
+}
+
+function toggleLabels() {
+	showLabels = !showLabels;
+	console.log(Toggling labels. New state: ${showLabels ? 'Visible' : 'Hidden'});
+	setLabelVisibility(showLabels);
+	statusDisplay.textContent = Labels ${showLabels ? 'shown' : 'hidden'};
+	document.getElementById('toggle-labels-btn').textContent = showLabels ? 'Hide Labels' : 'Show Labels';
+}
+
+// All the Search functions
+function searchNodes() {
+	const searchTerm = searchInput.value.trim().toLowerCase();
+	console.log("Search function. " + searchTerm)
+}
+</script>
+</body>
+</html>

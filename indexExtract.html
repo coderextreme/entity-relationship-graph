@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSON Media Viewer</title>
+    <style>
+        body { font-family: sans-serif; }
+
+        #media-container {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: center;  /* Center items horizontally */
+          margin-top: 20px;
+        }
+
+        .media-item {
+          width: 300px;  /* Increased width for X3D display */
+          height: 250px; /* Increased height for X3D display */
+          margin: 10px;
+          border: 1px solid #ccc;
+          padding: 5px;
+          box-sizing: border-box;
+          text-align: center; /* Center content within each item */
+        }
+
+        .media-item img, .media-item video {
+          max-width: 100%;
+          height: auto;
+        }
+
+        /* Style for X3DOM Canvas */
+        .media-item x3d {
+          width: 100%;
+          height: 100%;
+        }
+
+        #error-message {
+          color: red;
+          margin-top: 10px;
+          text-align: center;
+        }
+    </style>
+
+    <!-- X3DOM includes -->
+    <link rel='stylesheet' type='text/css' href='https://www.x3dom.org/download/x3dom.css'>
+    <script src='https://www.x3dom.org/download/x3dom.js'></script>
+</head>
+<body>
+
+    <h1>JSON Media Viewer</h1>
+
+    <input type="file" id="fileInput" accept=".json">
+    <button id="uploadButton">Load JSON</button>
+
+    <div id="error-message"></div>
+
+    <div id="media-container"></div>
+
+    <script>
+        document.getElementById('uploadButton').addEventListener('click', function() {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                displayError('No file selected.');
+                return;
+            }
+
+            if (!file.name.endsWith('.json')) {
+                displayError('Please select a JSON file.');
+                return;
+            }
+
+            const reader = new FileReader();
+
+            reader.onload = function(event) {
+                try {
+                    const jsonData = JSON.parse(event.target.result);
+                    const mediaUrls = extractMediaUrls(jsonData);
+                    displayMedia(mediaUrls);
+                } catch (error) {
+                    displayError('Error parsing JSON: ' + error);
+                }
+            };
+
+            reader.onerror = function() {
+                displayError('Error reading file.');
+            };
+
+            reader.readAsText(file);
+        });
+
+        function extractMediaUrls(data) {
+            const mediaUrls = [];
+
+            function recursiveExtract(data) {
+                if (typeof data === 'object' && data !== null) {
+                    if (Array.isArray(data)) {
+                        data.forEach(item => recursiveExtract(item));
+                    } else {
+                        for (const key in data) {
+                            recursiveExtract(data[key]);
+                        }
+                    }
+                } else if (typeof data === 'string') {
+                    const mediaType = getMediaType(data);
+                    if (mediaType) {
+                        mediaUrls.push({ type: mediaType, url: data });
+                    }
+                }
+            }
+
+            recursiveExtract(data);
+            return mediaUrls;
+        }
+
+
+        function getMediaType(url) {
+            if (url.match(/https?:\/\/.*\.(jpg|jpeg|png|gif)$/i)) {
+                return 'image';
+            } else if (url.match(/https?:\/\/.*\.(mp4|webm|ogg)$/i)) {
+                return 'video';
+            } else if (url.match(/https?:\/\/.*\.(x3d|x3dv|x3dj|json|glb|gltf)$/i)) {
+                return 'x3d';
+            } else {
+                return null;
+            }
+        }
+
+        function displayMedia(mediaUrls) {
+            const mediaContainer = document.getElementById('media-container');
+            mediaContainer.innerHTML = ''; // Clear existing content
+
+            mediaUrls.forEach(media => {
+                const mediaItem = document.createElement('div');
+                mediaItem.classList.add('media-item');
+
+                let mediaElement;
+
+                switch (media.type) {
+                    case 'image':
+                        mediaElement = document.createElement('img');
+                        mediaElement.src = media.url;
+                        mediaElement.alt = 'Image';
+                        break;
+                    case 'video':
+                        mediaElement = document.createElement('video');
+                        mediaElement.src = media.url;
+                        mediaElement.controls = true;
+                        break;
+                    case 'x3d':
+                         mediaElement = document.createElement('x3d');
+                         mediaElement.setAttribute('width', '300px');
+                         mediaElement.setAttribute('height', '250px');
+
+                         const sceneElement = document.createElement('scene');
+                         const inlineElement = document.createElement('inline');
+                         inlineElement.setAttribute('url', media.url);
+                         sceneElement.appendChild(inlineElement);
+                         mediaElement.appendChild(sceneElement);
+                         break;
+                    default:
+                        mediaElement = document.createElement('p');
+                        mediaElement.textContent = 'Unsupported media type';
+                }
+
+                mediaItem.appendChild(mediaElement);
+                mediaContainer.appendChild(mediaItem);
+            });
+	    x3dom.reload();
+        }
+
+        function displayError(message) {
+            const errorMessageDiv = document.getElementById('error-message');
+            errorMessageDiv.textContent = message;
+        }
+    </script>
+
+</body>
+</html>

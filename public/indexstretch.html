@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entity Relationship Visualization</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    #graph-container {
+      width: 100vw;
+      height: 100vh;
+      background-color: #f9f9f9;
+    }
+
+    .controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      z-index: 10;
+    }
+
+    .legend {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      z-index: 10;
+      font-size: 12px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+
+    .node {
+      stroke: #fff;
+      stroke-width: 1.5px;
+    }
+
+    .link {
+      stroke: #999;
+      stroke-opacity: 0.6;
+      stroke-width: 1.5px;
+      fill: none; /* Crucial:  Prevent fills */
+    }
+
+    .property-label {
+      font-size: 10px;
+      fill: #666;
+      pointer-events: none;
+    }
+
+    .node-label {
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .node-object {
+      fill: #1f77b4;
+    }
+
+    .node-array {
+      fill: #ff7f0e;
+    }
+
+    .node-text {
+      fill: #2ca02c;
+    }
+
+    .node-integer {
+      fill: #d62728;
+    }
+
+    .node-boolean {
+      fill: #9467bd;
+    }
+
+    .node-real,
+    .node-numeric {
+      fill: #8c564b;
+    }
+
+    .node-null {
+      fill: #e377c2;
+    }
+
+    .tooltip {
+      position: absolute;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 5px;
+      border-radius: 3px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      pointer-events: none;
+      font-size: 12px;
+      max-width: 300px;
+      z-index: 20;
+    }
+
+    .relationship-array-element {
+      stroke: #ff7f0e;
+    }
+
+    .relationship-has-property {
+      stroke: #1f77b4;
+    }
+
+    .property-arrow {
+      fill: #666;
+    }
+
+    .link.curved {
+      stroke-width: 2px; /* Thicker curved links */
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <button id="center-btn">Center Graph</button>
+    <button id="toggle-labels-btn">Toggle Labels</button>
+    <div>
+      <label for="search-input">Search Nodes: </label>
+      <input type="text" id="search-input" placeholder="Enter node label">
+      <button id="search-btn">Search</button>
+    </div>
+  </div>
+  <div id="graph-container"></div>
+  <div class="tooltip" style="display: none;"></div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #1f77b4;"></div>
+      <span>Object</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #ff7f0e;"></div>
+      <span>Array</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #2ca02c;"></div>
+      <span>Text</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #d62728;"></div>
+      <span>Integer</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #9467bd;"></div>
+      <span>Boolean</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #8c564b;"></div>
+      <span>Real/Numeric</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-color" style="background-color: #e377c2;"></div>
+      <span>Null</span>
+    </div>
+  </div>
+
+  <script>
+    // Initialize variables
+    let simulation, svg, nodes = [], links = [], nodeElements, linkElements, labelElements;
+    let showLabels = true;
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    let transform = d3.zoomIdentity;
+
+    // Create SVG container
+    svg = d3.select("#graph-container")
+      .append("svg")
+      .attr("width", "100%")
+      .attr("height", "100%")
+      .call(d3.zoom().on("zoom", (event) => {
+        transform = event.transform;
+        g.attr("transform", transform);
+      }));
+
+    // Create main group for graph elements
+    const g = svg.append("g");
+
+    // Create arrow marker for links
+    svg.append("defs").selectAll("marker")
+      .data(["arrow"])
+      .enter().append("marker")
+      .attr("id", d => d)
+      .attr("viewBox", "0 -5 10 10")
+      .attr("refX", 25)
+      .attr("refY", 0)
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path")
+      .attr("d", "M0,-5L10,0L0,5")
+      .attr("class", "property-arrow");
+
+    // Tooltip
+    const tooltip = d3.select(".tooltip");
+
+    // Load data from API
+    fetchGraphData();
+
+    function fetchGraphData() {
+      fetch('/api/graph')
+        .then(response => response.json())
+        .then(data => {
+          // Process data
+          nodes = data.nodes;
+          links = data.links;
+
+          // Preprocess to count links between same nodes
+          const linkCounts = {};
+          links.forEach(link => {
+            const key = [link.source, link.target].sort().join('-'); // Unique key
+            linkCounts[key] = (linkCounts[key] || 0) + 1;
+            link.linkNum = linkCounts[key]; // Assign link number
+            link.totalLinks = linkCounts[key]; // Assign total number
+          });
+
+          // Render graph
+          renderGraph();
+        })
+        .catch(error => console.error('Error fetching graph data:', error));
+    }
+
+    function renderGraph() {
+      // Clear previous elements
+      g.selectAll("*").remove();
+
+      // Create link elements
+      linkElements = g.append("g")
+        .selectAll("path") // Use path for curved links
+        .data(links)
+        .enter().append("path")
+        .attr("class", d => `link relationship-${d.type.toLowerCase().replace(/_/g, '-')}${d.totalLinks > 1 ? ' curved' : ''}`)
+        .attr("marker-end", "url(#arrow)");
+
+      // Create property label elements
+      const propertyLabelElements = g.append("g")
+        .selectAll("text")
+        .data(links)
+        .enter().append("text")
+        .attr("class", "property-label")
+        .text(d => d.propertyLabel)
+        .attr("display", showLabels ? null : "none");
+
+      // Create node elements
+      nodeElements = g.append("g")
+        .selectAll("circle")
+        .data(nodes)
+        .enter().append("circle")
+        .attr("class", d => `node node-${d.type.toLowerCase()}`)
+        .attr("r", d => getNodeRadius(d))
+        .on("mouseover", handleMouseOver)
+        .on("mouseout", handleMouseOut)
+        .on("click", handleNodeClick);
+
+      // Create node label elements
+      labelElements = g.append("g")
+        .selectAll("text")
+        .data(nodes)
+        .enter().append("text")
+        .attr("class", "node-label")
+        .text(d => truncateLabel(d.label))
+        .attr("display", showLabels ? null : "none");
+
+      // Create force simulation
+      simulation = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(150))
+        .force("charge", d3.forceManyBody().strength(-300))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collision", d3.forceCollide().radius(d => getNodeRadius(d) + 10))
+        .on("tick", ticked);
+
+      // Update positions on tick
+      function ticked() {
+        nodeElements
+          .attr("cx", d => d.x)
+          .attr("cy", d => d.y);
+
+        labelElements
+          .attr("x", d => d.x + getNodeRadius(d) + 5)
+          .attr("y", d => d.y + 4);
+
+        propertyLabelElements
+          .attr("x", d => (d.source.x + d.target.x) / 2)
+          .attr("y", d => (d.source.y + d.target.y) / 2 - 5);
+
+        linkElements.attr("d", linkArc);
+      }
+
+      function linkArc(d) {
+        const dx = d.target.x - d.source.x;
+        const dy = d.target.y - d.source.y;
+        const dr = Math.sqrt(dx * dx + dy * dy);
+        const offset = 10 * (d.linkNum -1 - (d.totalLinks - 1) / 2);
+        return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+      }
+    }
+
+    // Mouse event handlers
+    function handleMouseOver(event, d) {
+      const tooltipContent = `
+        <strong>ID:</strong> ${d.id}<br>
+        <strong>Type:</strong> ${d.type}<br>
+        <strong>Value:</strong> ${getNodeValue(d)}<br>
+        ${d.file ? `<strong>Source File:</strong> ${d.file}` : ''}
+      `;
+
+      tooltip
+        .html(tooltipContent)
+        .style("left", (event.pageX + 10) + "px")
+        .style("top", (event.pageY + 10) + "px")
+        .style("display", "block");
+
+      // Highlight node
+      d3.select(event.currentTarget)
+        .attr("r", getNodeRadius(d) * 1.3);
+    }
+
+    function handleMouseOut(event, d) {
+      tooltip.style("display", "none");
+
+      // Restore node size
+      d3.select(event.currentTarget)
+        .attr("r", getNodeRadius(d));
+    }
+
+    function handleNodeClick(event, d) {
+      // Find connected nodes
+      const connectedLinks = links.filter(link =>
+        link.source.id === d.id || link.target.id === d.id || link.property.id === d.id
+      );
+
+      // Highlight connected links
+      linkElements
+        .classed("highlighted", false)
+        .filter(link => connectedLinks.includes(link))
+        .classed("highlighted", true)
+        .attr("stroke-width", 3);
+
+      // Highlight connected nodes
+      const connectedNodeIds = new Set();
+      connectedLinks.forEach(link => {
+        connectedNodeIds.add(typeof link.source === 'object' ? link.source.id : link.source);
+        connectedNodeIds.add(typeof link.target === 'object' ? link.target.id : link.target);
+        connectedNodeIds.add(typeof link.property === 'object' ? link.property.id : link.property);
+      });
+
+      nodeElements
+        .classed("highlighted", false)
+        .filter(node => connectedNodeIds.has(node.id))
+        .classed("highlighted", true);
+    }
+
+    // Helper functions
+    function getNodeRadius(d) {
+      if (d.type === 'OBJECT') return 15;
+      if (d.type === 'ARRAY') return 12;
+      return 8;
+    }
+
+    function getNodeValue(d) {
+      if (d.type === 'INTEGER' && d.int_value !== null) return d.int_value;
+      if (d.type === 'TEXT' && d.text_value !== null) return d.text_value;
+      if (d.type === 'BOOLEAN' && d.bool_value !== null) return d.bool_value ? 'true' : 'false';
+      if (d.type === 'REAL' && d.real_value !== null) return d.real_value;
+      if (d.type === 'NUMERIC' && d.numeric_value !== null) return d.numeric_value;
+      if (d.type === 'OBJECT') return 'Object';
+      if (d.type === 'ARRAY') return 'Array';
+      if (d.type === 'NULL') return 'null';
+      return '';
+    }
+
+    function truncateLabel(label) {
+      return label.length > 15 ? label.substring(0, 12) + '...' : label;
+    }
+
+    // Button event handlers
+    document.getElementById('center-btn').addEventListener('click', () => {
+      svg.transition().duration(750).call(
+        d3.zoom().transform,
+        d3.zoomIdentity.translate(width / 2, height / 2).scale(1)
+      );
+    });
+
+    document.getElementById('toggle-labels-btn').addEventListener('click', () => {
+      showLabels = !showLabels;
+      d3.selectAll('.node-label, .property-label')
+        .attr('display', showLabels ? null : 'none');
+    });
+
+    document.getElementById('search-btn').addEventListener('click', searchNodes);
+    document.getElementById('search-input').addEventListener('keyup', (event) => {
+      if (event.key === 'Enter') {
+        searchNodes();
+      }
+    });
+
+    function searchNodes() {
+      const searchTerm = document.getElementById('search-input').value.toLowerCase();
+      if (!searchTerm) return;
+
+      // Find matching nodes
+      const matchingNodes = nodes.filter(node =>
+        node.label.toLowerCase().includes(searchTerm)
+      );
+
+      if (matchingNodes.length > 0) {
+        // Highlight matching nodes
+        nodeElements
+          .classed('search-result', false)
+          .filter(node => matchingNodes.includes(node))
+          .classed('search-result', true)
+          .attr('r', d => getNodeRadius(d) * 1.5);
+
+        // Focus on first matching node
+        const firstMatch = matchingNodes[0];
+        svg.transition().duration(750).call(
+          d3.zoom().transform,
+          d3.zoomIdentity.translate(width / 2 - firstMatch.x, height / 2 - firstMatch.y).scale(1.5)
+        );
+      }
+    }
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      width = window.innerWidth;
+      height = window.innerHeight;
+      simulation.force("center", d3.forceCenter(width / 2, height / 2));
+      simulation.alpha(0.3).restart();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+Okay, adding the 'Version' type requires specifying its behavior, especially regarding relationships and how it's represented in Python during import/export. Assuming 'Version' is intended to be like an ordered dictionary (having both key-value properties like an Object and a defined order like an Array), here's the updated prompt:
+
+Prompt:
+
+Please create a system for storing and retrieving arbitrary Python object graphs (representing potentially complex JavaScript-like data structures) using an SQLite database. The system should consist of three Python scripts: one to create the database schema, one to import a Python object graph into the database, and one to export the graph verbatim from the database.
+
+I. Database Schema (generic_store.db)
+
+Design an SQLite schema with three tables: EntityType, Entity, and Relationship.
+
+EntityType Table:
+
+Columns: id (INTEGER PRIMARY KEY AUTOINCREMENT), name (TEXT UNIQUE NOT NULL).
+
+Purpose: Stores the names of the fundamental data types being represented.
+
+Initial Data: Must contain 'Object', 'Array', 'Version', 'String', 'Number', 'Boolean', 'Null'. (Added 'Version')
+
+Entity Table:
+
+Columns:
+
+id (INTEGER PRIMARY KEY AUTOINCREMENT)
+
+entity_type_id (INTEGER NOT NULL, FOREIGN KEY REFERENCES EntityType(id))
+
+value_str (TEXT NULL)
+
+value_num (REAL NULL) - Should store Python int and float.
+
+value_bool (INTEGER NULL) - Should store Python bool (e.g., 0/1).
+
+Purpose: Represents every single node in the data graph, whether it's a primitive value or a container. For container types ('Object', 'Array', 'Version'), the value columns should be NULL. (Added 'Version')
+
+Relationship Table:
+
+Columns:
+
+id (INTEGER PRIMARY KEY AUTOINCREMENT)
+
+parent_entity_id (INTEGER NOT NULL, FOREIGN KEY REFERENCES Entity(id))
+
+child_entity_id (INTEGER NOT NULL, FOREIGN KEY REFERENCES Entity(id))
+
+relationship_specifier_id (INTEGER NOT NULL, FOREIGN KEY REFERENCES Entity(id))
+
+Purpose: Defines the structure of the graph by linking parent entities to child entities via a 'specifier'.
+
+Key Points:
+
+child_entity_id can reference any type of Entity.
+
+relationship_specifier_id can reference any type of Entity.
+
+If parent_entity_id references a 'Version' entity, the relationship_specifier_id can point to either a 'String' entity (representing a key) or a 'Number' entity (representing an index/order), allowing it to behave like an ordered collection with potential key access. (Clarified 'Version' behavior)
+
+Constraints: Add a UNIQUE constraint on (parent_entity_id, relationship_specifier_id).
+
+II. Python Scripts
+
+Create three separate Python 3 scripts using the sqlite3 library.
+
+create_schema.py:
+
+Connects to the SQLite database file (e.g., generic_store.db). Creates the file if it doesn't exist, deletes and recreates it if it does.
+
+Executes the CREATE TABLE statements for EntityType, Entity, and Relationship.
+
+Enforces foreign key constraints (PRAGMA foreign_keys = ON;).
+
+Populates the EntityType table with the initial required types (including 'Version').
+
+Creates appropriate indexes.
+
+import_structure.py:
+
+Accepts the path to a Python file (.py) defining a data_structure variable. Use importlib.
+
+Connects to the database.
+
+Implements a recursive function (import_node) to traverse the input Python object graph.
+
+For each node:
+
+Determine its Python type. If the type is collections.OrderedDict, map it to the 'Version' EntityType. Map dict to 'Object', list to 'Array', tuple maybe to 'Array' or a new 'Tuple' type. Handle primitives (str, int, float, bool, None). Raise TypeError for others.
+
+Insert a corresponding row into the Entity table.
+
+Use a cache (id(node) -> entity_id) for identity and cycles.
+
+For container nodes:
+
+dict ('Object'): Iterate items(). Import key and value. Create relationship using key's entity ID as relationship_specifier_id.
+
+list/tuple ('Array'/'Tuple'): Iterate enumerate(). Import integer index and value. Create relationship using index's ('Number') entity ID as relationship_specifier_id.
+
+OrderedDict ('Version'): Iterate items(). Import key and value. Create relationship using key's entity ID as relationship_specifier_id. Crucially, the order of relationship insertions should reflect the OrderedDict iteration order. (SQLite row insertion order can sometimes be used implicitly, but relying on Relationship.id order during export is safer if strict order is needed).
+
+Use database transactions.
+
+export_structure.py:
+
+Accepts output file, optional database path, and --format ('pickle', 'pprint').
+
+Connects to the database.
+
+Finds a root entity ID.
+
+Implements a recursive function (rebuild_node).
+
+Uses a cache (entity_id -> rebuilt object) for sharing and cycles.
+
+rebuild_node logic:
+
+Fetch entity data.
+
+Handle base cases (String, Number, Boolean, Null).
+
+Handle containers:
+
+'Object': Rebuild as Python dict. Fetch relationships, rebuild specifiers (keys) and children (values), populate dict. Handle non-hashable keys.
+
+'Array'/'Tuple': Rebuild as Python list (or tuple). Attempt standard list reconstruction if specifiers are sequential integers. Otherwise, rebuild as list of [specifier, value] pairs with a warning.
+
+'Version': Rebuild as Python collections.OrderedDict. Fetch relationships ordered by Relationship.id ASC (to preserve the likely import order). For each relationship, rebuild the specifier (key) and child (value). Add the key: value pair to the OrderedDict.
+
+Based on format:
+
+'pickle': Serialize the reconstructed root object using pickle.
+
+'pprint': Format using pprint and write to text file.
+
+Do not use json.dump.
+
+Ensure all scripts include necessary imports (collections.OrderedDict needed), error handling, clear print statements, command-line usability, and comments.

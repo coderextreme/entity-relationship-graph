@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>X3DOM Force-Directed Graph</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <script src="https://www.x3dom.org/download/x3dom.js"></script>
+    <link rel="stylesheet" href="https://www.x3dom.org/download/x3dom.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #x3d-container {
+            width: 900px;
+            height: 600px;
+            border: 1px solid #ccc;
+            margin: 20px 0;
+        }
+
+        #x3d-canvas {
+            width: 100%;
+            height: 100%;
+            background-color: #f5f5f5;
+        }
+
+        .controls {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            width: 900px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        button {
+            padding: 8px 12px;
+            margin: 5px 0;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .status {
+            padding: 8px;
+            margin-top: 10px;
+            border-radius: 4px;
+            background-color: #eee;
+            min-height: 20px;
+        }
+
+        .legend {
+            margin-top: 15px;
+            border-top: 1px solid #ccc;
+            padding-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin-right: 15px;
+            margin-bottom: 5px;
+        }
+
+        .legend-color {
+            width: 15px;
+            height: 15px;
+            margin-right: 5px;
+            border-radius: 50%;
+        }
+
+        .message {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            border-radius: 5px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            z-index: 100;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>X3DOM Force-Directed Graph Visualization</h1>
+
+    <div class="controls">
+        <div class="control-group">
+            <button id="reset-view">Reset View</button>
+            <button id="toggle-labels">Toggle Labels</button>
+            <button id="run-simulation">Restart Simulation</button>
+        </div>
+
+        <div class="control-group">
+            <div>
+                <label for="simulation-strength">Simulation Strength:</label>
+                <input type="range" id="simulation-strength" min="0.1" max="5" step="0.1" value="1">
+            </div>
+            <div>
+                <label for="link-distance">Link Distance:</label>
+                <input type="range" id="link-distance" min="1" max="10" step="0.5" value="3">
+            </div>
+        </div>
+
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #1f77b4;"></div>
+                <span>Object</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #ff7f0e;"></div>
+                <span>Array</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #2ca02c;"></div>
+                <span>String</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #d62728;"></div>
+                <span>Number</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background-color: #9467bd;"></div>
+                <span>Boolean</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="status" class="status">Loading data...</div>
+
+    <div id="x3d-container">
+        <x3d id="x3d-canvas">
+            <scene id="main-scene">
+                <Background skyColor="0.97 0.97 0.97"></Background>
+                <Viewpoint id="main-view" position="0 0 40" orientation="0 0 1 0" description="Main View"></Viewpoint>
+                <NavigationInfo type='"EXAMINE" "ANY"' headlight="true"></NavigationInfo>
+                <Group id="nodes-group"></Group>
+                <Group id="links-group"></Group>
+                <Group id="labels-group"></Group>
+            </scene>
+        </x3d>
+    </div>
+
+    <div id="message" class="message"></div>
+
+    <script>
+        // Main variables
+        let nodes = [];
+        let links = [];
+        let nodesGroup = document.getElementById('nodes-group');
+        let linksGroup = document.getElementById('links-group');
+        let labelsGroup = document.getElementById('labels-group');
+        let statusDiv = document.getElementById('status');
+        let simulation;
+        let labelsVisible = true;
+
+        // Node and link DOM elements collections
+        let nodeElements = {};
+        let linkElements = {};
+        let labelElements = {};
+
+        // Show message function
+        function showMessage(message, duration = 3000) {
+            const messageDiv = document.getElementById('message');
+            messageDiv.textContent = message;
+            messageDiv.style.display = 'block';
+
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, duration);
+        }
+
+        // Color mapping functions
+        function getNodeColor(nodeType) {
+            switch(nodeType) {
+                case 'Object': return [0.12, 0.47, 0.71]; // #1f77b4
+                case 'Array': return [1.00, 0.50, 0.05]; // #ff7f0e
+                case 'String': return [0.17, 0.63, 0.17]; // #2ca02c
+                case 'Number': return [0.84, 0.15, 0.16]; // #d62728
+                case 'Boolean': return [0.58, 0.40, 0.74]; // #9467bd
+                case 'Null': return [0.55, 0.34, 0.29]; // #8c564b
+                default: return [0.50, 0.50, 0.50]; // #7f7f7f
+            }
+        }
+
+        function getLinkColor(link) {
+            if (link.specifier_complex) {
+                return [0.61, 0.35, 0.71]; // #9c57b5
+            }
+
+            switch(link.spec_type) {
+                case 'Number': return [0.20, 0.60, 0.86]; // #3399db
+                case 'String': return [0.91, 0.30, 0.24]; // #e84c3d
+                case 'Boolean': return [0.95, 0.77, 0.06]; // #f1c40f
+                default: return [0.60, 0.60, 0.60]; // #999999
+            }
+        }
+
+        // Helper to convert color array to string for X3DOM
+        function colorToString(colorArray) {
+            return colorArray.join(' ');
+        }
+
+        // Node size based on importance/connections
+        function getNodeSize(node) {
+            // Default size
+            return 0.07;
+        }
+
+        // Create and add a node to the scene
+        function createNode(node, position) {
+            // Create container transform
+            const transform = document.createElement('Transform');
+            transform.setAttribute('id', `node-${node.id}`);
+            transform.setAttribute('translation', `${position.x} ${position.y} ${position.z}`);
+
+            // Create shape with sphere
+            const shape = document.createElement('Shape');
+            const appearance = document.createElement('Appearance');
+            const material = document.createElement('Material');
+            const nodeColor = getNodeColor(node.type);
+            material.setAttribute('diffuseColor', colorToString(nodeColor));
+
+            const sphere = document.createElement('Sphere');
+            const nodeSize = getNodeSize(node);
+            sphere.setAttribute('radius', nodeSize);
+
+            // Assemble node
+            appearance.appendChild(material);
+            shape.appendChild(appearance);
+            shape.appendChild(sphere);
+            transform.appendChild(shape);
+
+            // Add to scene
+            nodesGroup.appendChild(transform);
+            nodeElements[node.id] = transform;
+
+            // Add label
+            createNodeLabel(node, position);
+
+            return transform;
+        }
+
+        // Create a text label for a node
+        function createNodeLabel(node, position) {
+            const transform = document.createElement('Transform');
+            transform.setAttribute('id', `label-node-${node.id}`);
+            transform.setAttribute('translation', `${position.x} ${position.y + getNodeSize(node) + 0.5} ${position.z}`);
+
+            const billboard = document.createElement('Billboard');
+            billboard.setAttribute('axisOfRotation', '0 0 0');
+
+            const shape = document.createElement('Shape');
+            const appearance = document.createElement('Appearance');
+            const material = document.createElement('Material');
+            material.setAttribute('diffuseColor', '0 0 0');
+
+            const text = document.createElement('Text');
+            // Use node label or id
+            const labelText = node.label || `ID: ${node.id}`;
+            text.setAttribute('string', `"${labelText}"`);
+
+            const fontStyle = document.createElement('FontStyle');
+            fontStyle.setAttribute('size', '0.08');
+            fontStyle.setAttribute('family', 'Arial');
+
+            // Assemble label
+            text.appendChild(fontStyle);
+            appearance.appendChild(material);
+            shape.appendChild(appearance);
+            shape.appendChild(text);
+            billboard.appendChild(shape);
+            transform.appendChild(billboard);
+
+            // Add to scene
+            labelsGroup.appendChild(transform);
+            labelElements[`node-${node.id}`] = transform;
+
+            return transform;
+        }
+
+        // Create and add a link between nodes
+        function createLink(link, sourcePos, targetPos) {
+            const shape = document.createElement('Shape');
+            shape.setAttribute('id', `link-${link.source}-${link.target}`);
+
+            const appearance = document.createElement('Appearance');
+            const material = document.createElement('Material');
+            const linkColor = getLinkColor(link);
+            material.setAttribute('emissiveColor', colorToString(linkColor));
+
+            const lineSet = document.createElement('LineSet');
+            const coordinate = document.createElement('Coordinate');
+            coordinate.setAttribute('point', `${sourcePos.x} ${sourcePos.y} ${sourcePos.z}, ${targetPos.x} ${targetPos.y} ${targetPos.z}`);
+
+            const coordIndex = document.createElement('CoordIndex');
+            coordIndex.setAttribute('value', '0 1 -1');
+
+            // Assemble link
+            lineSet.appendChild(coordinate);
+            lineSet.appendChild(coordIndex);
+            appearance.appendChild(material);
+            shape.appendChild(appearance);
+            shape.appendChild(lineSet);
+
+            // Add to scene
+            linksGroup.appendChild(shape);
+            linkElements[`${link.source}-${link.target}`] = {
+                element: shape,
+                coordinate: coordinate
+            };
+
+            // Add label
+            createLinkLabel(link, {
+                x: (sourcePos.x + targetPos.x) / 2,
+                y: (sourcePos.y + targetPos.y) / 2,
+                z: (sourcePos.z + targetPos.z) / 2
+            });
+
+            return shape;
+        }
+
+        // Create a text label for a link
+        function createLinkLabel(link, position) {
+            // Skip if no label
+            if (!link.label) return;
+
+            const transform = document.createElement('Transform');
+            transform.setAttribute('id', `label-link-${link.source}-${link.target}`);
+            transform.setAttribute('translation', `${position.x} ${position.y + 0.3} ${position.z}`);
+
+            const billboard = document.createElement('Billboard');
+            billboard.setAttribute('axisOfRotation', '0 0 0');
+
+            const shape = document.createElement('Shape');
+            const appearance = document.createElement('Appearance');
+            const material = document.createElement('Material');
+            material.setAttribute('diffuseColor', '0.3 0.3 0.3');
+
+            const text = document.createElement('Text');
+            // Truncate long labels
+            let labelText = link.label;
+            if (labelText && labelText.length > 15) {
+                labelText = labelText.substring(0, 12) + '...';
+            }
+            text.setAttribute('string', `"${labelText}"`);
+
+            const fontStyle = document.createElement('FontStyle');
+            fontStyle.setAttribute('size', '0.06');
+            fontStyle.setAttribute('family', 'Arial');
+
+            // Assemble label
+            text.appendChild(fontStyle);
+            appearance.appendChild(material);
+            shape.appendChild(appearance);
+            shape.appendChild(text);
+            billboard.appendChild(shape);
+            transform.appendChild(billboard);
+
+            // Add to scene
+            labelsGroup.appendChild(transform);
+            labelElements[`link-${link.source}-${link.target}`] = transform;
+
+            return transform;
+        }
+
+        // Update the position of a node
+        function updateNodePosition(nodeId, position) {
+            if (nodeElements[nodeId]) {
+                nodeElements[nodeId].setAttribute('translation', `${position.x} ${position.y} ${position.z}`);
+
+                // Update label position
+                if (labelElements[`node-${nodeId}`]) {
+                    labelElements[`node-${nodeId}`].setAttribute('translation',
+                        `${position.x} ${position.y + getNodeSize({ id: nodeId }) + 0.5} ${position.z}`);
+                }
+            }
+        }
+
+        // Update the position of a link
+        function updateLinkPosition(sourceId, targetId, sourcePos, targetPos) {
+            const linkKey = `${sourceId}-${targetId}`;
+            if (linkElements[linkKey] && linkElements[linkKey].coordinate) {
+                linkElements[linkKey].coordinate.setAttribute('point',
+                    `${sourcePos.x} ${sourcePos.y} ${sourcePos.z}, ${targetPos.x} ${targetPos.y} ${targetPos.z}`);
+
+                // Update label position
+                if (labelElements[`link-${linkKey}`]) {
+                    labelElements[`link-${linkKey}`].setAttribute('translation',
+                        `${(sourcePos.x + targetPos.x) / 2} ${(sourcePos.y + targetPos.y) / 2 + 0.3} ${(sourcePos.z + targetPos.z) / 2}`);
+                }
+            }
+        }
+
+        // Clear the scene
+        function clearScene() {
+            while (nodesGroup.firstChild) {
+                nodesGroup.removeChild(nodesGroup.firstChild);
+            }
+            while (linksGroup.firstChild) {
+                linksGroup.removeChild(linksGroup.firstChild);
+            }
+            while (labelsGroup.firstChild) {
+                labelsGroup.removeChild(labelsGroup.firstChild);
+            }
+
+            nodeElements = {};
+            linkElements = {};
+            labelElements = {};
+        }
+
+        // Initialize the force-directed simulation
+        function initializeSimulation() {
+            const strength = parseFloat(document.getElementById('simulation-strength').value);
+            const distance = parseFloat(document.getElementById('link-distance').value);
+
+            // Initialize positions if not set
+            nodes.forEach(node => {
+                if (!node.x) node.x = Math.random() * 10 - 5;
+                if (!node.y) node.y = Math.random() * 10 - 5;
+                if (!node.z) node.z = Math.random() * 10 - 5;
+            });
+
+            // Create force simulation
+            simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id).distance(distance * 2))
+                .force('charge', d3.forceManyBody().strength(-20 * strength))
+                .force('center', d3.forceCenter(0, 0, 0))
+                .force('x', d3.forceX().strength(0.05 * strength))
+                .force('y', d3.forceY().strength(0.05 * strength))
+                .force('z', d3.forceZ().strength(0.05 * strength))
+                .on('tick', simulationTick)
+                .alphaDecay(0.01); // Slower decay for more iterations
+
+            // Update scene on each tick
+            function simulationTick() {
+                nodes.forEach(node => {
+                    updateNodePosition(node.id, node);
+                });
+
+                links.forEach(link => {
+                    const source = typeof link.source === 'object' ? link.source : nodes.find(n => n.id === link.source);
+                    const target = typeof link.target === 'object' ? link.target : nodes.find(n => n.id === link.target);
+
+                    if (source && target) {
+                        updateLinkPosition(source.id, target.id, source, target);
+                    }
+                });
+            }
+        }
+
+        // Reset the simulation with new parameters
+        function resetSimulation() {
+            if (simulation) {
+                simulation.stop();
+            }
+
+            const strength = parseFloat(document.getElementById('simulation-strength').value);
+            const distance = parseFloat(document.getElementById('link-distance').value);
+
+            // Update simulation parameters
+            simulation.force('link').distance(distance * 2);
+            simulation.force('charge').strength(-20 * strength);
+            simulation.force('x').strength(0.05 * strength);
+            simulation.force('y').strength(0.05 * strength);
+            simulation.force('z').strength(0.05 * strength);
+
+            // Restart simulation
+            simulation.alpha(1).restart();
+            showMessage("Simulation restarted with new parameters");
+        }
+
+        // Toggle visibility of labels
+        function toggleLabels() {
+            labelsVisible = !labelsVisible;
+            labelsGroup.setAttribute('render', labelsVisible.toString());
+            showMessage(labelsVisible ? "Labels shown" : "Labels hidden");
+        }
+
+        // Reset the camera view
+        function resetView() {
+            const viewpoint = document.getElementById('main-view');
+            viewpoint.setAttribute('set_bind', 'true');
+            showMessage("View reset");
+        }
+
+        // Fetch data from server
+        async function fetchData() {
+            try {
+                statusDiv.textContent = "Fetching data...";
+
+                // Simulating the fetch from /data endpoint
+                // In a real application, replace this with actual fetch call
+                const response = await fetch('/data');
+                const data = await response.json();
+
+                // Using sample data for demonstration
+		    /*
+                const data = {
+                    nodes: [
+                        { id: 1, type: "Object", label: "Object" },
+                        { id: 2, type: "String", label: "X3D" },
+                        { id: 3, type: "Object", label: "Object" },
+                        { id: 4, type: "String", label: "encoding" },
+                        { id: 5, type: "String", label: "UTF-8" },
+                        { id: 6, type: "String", label: "@profile" },
+                        { id: 7, type: "String", label: "Immersive" },
+                        { id: 8, type: "String", label: "@version" },
+                        { id: 9, type: "String", label: "4.0" },
+                        { id: 10, type: "String", label: "@schema" },
+                        { id: 11, type: "String", label: "x3d-4.0.xsd" },
+                        { id: 12, type: "String", label: "JSON schema" },
+                        { id: 13, type: "String", label: "x3d-4.0-JSONSchema.json" },
+                        { id: 14, type: "String", label: "head" },
+                        { id: 15, type: "Object", label: "Object" },
+                        { id: 16, type: "String", label: "component" },
+                        { id: 17, type: "Array", label: "Array" },
+                        { id: 18, type: "Number", label: "0" },
+                        { id: 19, type: "Object", label: "Object" },
+                        { id: 20, type: "String", label: "@name" }
+                    ],
+                    links: [
+                        { source: 3, target: 5, specifier_id: 4, spec_type: "String", label: "encoding" },
+                        { source: 3, target: 7, specifier_id: 6, spec_type: "String", label: "@profile" },
+                        { source: 3, target: 9, specifier_id: 8, spec_type: "String", label: "@version" },
+                        { source: 3, target: 11, specifier_id: 10, spec_type: "String", label: "@schema" },
+                        { source: 3, target: 13, specifier_id: 12, spec_type: "String", label: "JSON schema" },
+                        { source: 19, target: 20, specifier_id: 4, spec_type: "String", label: "@name" },
+                        { source: 17, target: 19, specifier_id: 18, spec_type: "Number", label: "0" },
+                        { source: 15, target: 17, specifier_id: 16, spec_type: "String", label: "component" }
+                    ]
+                };
+		    */
+
+                statusDiv.textContent = `Loaded ${data.nodes.length} nodes and ${data.links.length} links`;
+
+                // Use the data
+                nodes = data.nodes;
+                links = data.links;
+
+                renderGraph();
+
+            } catch (error) {
+                console.error("Error fetching data:", error);
+                statusDiv.textContent = "Error loading data: " + error.message;
+            }
+        }
+
+        // Render the graph
+        function renderGraph() {
+            clearScene();
+
+            // Create an initial random position for each node
+            nodes.forEach(node => {
+                node.x = Math.random() * 10 - 5;
+                node.y = Math.random() * 10 - 5;
+                node.z = Math.random() * 10 - 5;
+
+                createNode(node, node);
+            });
+
+            // Create links
+            links.forEach(link => {
+                const source = nodes.find(n => n.id === link.source);
+                const target = nodes.find(n => n.id === link.target);
+
+                if (source && target) {
+                    createLink(link, source, target);
+                }
+            });
+
+            // Start simulation
+            initializeSimulation();
+            showMessage("Graph rendered successfully");
+        }
+
+        // Initialize the application
+        function initialize() {
+            // Set up event listeners
+            document.getElementById('reset-view').addEventListener('click', resetView);
+            document.getElementById('toggle-labels').addEventListener('click', toggleLabels);
+            document.getElementById('run-simulation').addEventListener('click', resetSimulation);
+
+            // Fetch data and render graph
+            fetchData();
+        }
+
+        // Start when document is loaded
+        document.addEventListener('DOMContentLoaded', initialize);
+    </script>
+</body>
+</html>

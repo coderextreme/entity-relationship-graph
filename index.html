@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Python Object Graph Visualization</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars */
+            background-color: #f4f4f4;
+        }
+        svg {
+            display: block; /* Remove extra space below SVG */
+            width: 100vw;
+            height: 100vh;
+            cursor: grab;
+            background-color: #fff;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+        svg:active {
+             cursor: grabbing;
+        }
+
+        /* Node Styles */
+        .node circle {
+            stroke: #333;
+            stroke-width: 1.5px;
+        }
+        .node text {
+            font-size: 10px;
+            fill: #444;
+            text-anchor: middle;
+            dominant-baseline: central;
+            pointer-events: none; /* Allow dragging through text */
+            /* Simple halo effect */
+            paint-order: stroke;
+            stroke: #fff;
+            stroke-width: 2px;
+            stroke-linecap: butt;
+            stroke-linejoin: miter;
+        }
+
+        /* Link Styles */
+        .link line {
+            stroke: #999;
+            stroke-opacity: 0.6;
+            stroke-width: 1.5px; /* Default width */
+        }
+        /* Style links based on specifier type if needed */
+        .link.spec-type-Number line { stroke: #3498db; }
+        .link.spec-type-String line { stroke: #e74c3c; }
+        .link.spec-type-Boolean line { stroke: #f1c40f; }
+        .link.spec-complex line {
+             stroke: #9b59b6;
+             stroke-dasharray: 3,3; /* Dashed for complex specifiers */
+        }
+
+
+        /* Link Label Styles */
+        .link-label text {
+            font-size: 9px;
+            fill: #555;
+            text-anchor: middle;
+            dominant-baseline: central;
+            pointer-events: none; /* Allow clicking through label */
+            /* Halo effect for readability */
+            paint-order: stroke;
+            stroke: #fff; /* White background/halo */
+            stroke-width: 2.5px;
+            stroke-linecap: butt; /* More precise stroke */
+            stroke-linejoin: miter;
+        }
+
+        /* Tooltip (using title element) */
+        .node circle:hover {
+            stroke-width: 3px;
+            stroke: black;
+        }
+
+        /* Loading/Error Messages */
+        #message {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 10px;
+            background-color: rgba(255, 255, 0, 0.8);
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            display: none; /* Hidden by default */
+            z-index: 10;
+        }
+        #message.error {
+            background-color: rgba(255, 0, 0, 0.8);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div id="message">Loading data...</div>
+    <svg id="graph-svg"></svg>
+
+    <script>
+        const messageDiv = document.getElementById('message');
+
+        function showMessage(text, isError = false) {
+            messageDiv.textContent = text;
+            messageDiv.className = isError ? 'error' : '';
+            messageDiv.style.display = 'block';
+        }
+
+        function hideMessage() {
+            messageDiv.style.display = 'none';
+        }
+
+        showMessage("Loading data...");
+
+        // Fetch data from the server's /data endpoint
+        fetch('/data')
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errData => {
+                         throw new Error(`HTTP error ${response.status}: ${errData.error || response.statusText}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                hideMessage();
+                if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+                    throw new Error("Invalid data format received from server.");
+                }
+                if (data.nodes.length === 0 && data.links.length === 0) {
+                    showMessage("No data to display. The database might be empty or contain no relationships.", false);
+                    // Optionally, clear the SVG or don't proceed with rendering
+                     return; // Stop if no data
+                }
+                 // Client-side safety check: Ensure links reference valid nodes
+                 const nodeIds = new Set(data.nodes.map(n => n.id));
+                 const validLinks = data.links.filter(link =>
+                    nodeIds.has(link.source) && nodeIds.has(link.target)
+                 );
+
+                 if(validLinks.length !== data.links.length) {
+                    console.warn("Some links were filtered out client-side due to missing nodes.");
+                 }
+
+                 // If source/target in links are objects, d3 needs them to be ids or indices
+                 // Our server provides IDs, so we tell forceLink how to find them.
+                 const linksForSimulation = validLinks.map(l => ({...l})); // Shallow copy
+                 const nodesForSimulation = data.nodes.map(n => ({...n})); // Shallow copy
+
+                renderGraph(nodesForSimulation, linksForSimulation);
+            })
+            .catch(error => {
+                console.error('Error fetching or processing graph data:', error);
+                showMessage(`Error: ${error.message}`, true);
+            });
+
+        function getNodeColor(nodeType) {
+            switch (nodeType) {
+                case 'Object': return '#1f77b4'; // Blue
+                case 'Array': return '#ff7f0e'; // Orange
+                case 'Version': return '#aec7e8'; // Light Blue (for OrderedDict)
+                case 'String': return '#2ca02c'; // Green
+                case 'Number': return '#d62728'; // Red
+                case 'Boolean': return '#9467bd'; // Purple
+                case 'Null': return '#8c564b'; // Brown
+                default: return '#7f7f7f'; // Grey
+            }
+        }
+
+        function renderGraph(nodes, links) {
+            const svg = d3.select("#graph-svg");
+            const width = svg.node().getBoundingClientRect().width;
+            const height = svg.node().getBoundingClientRect().height;
+
+            // --- Create Simulation ---
+            const simulation = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links) // Use the links array
+                                .id(d => d.id) // Tell forceLink how to identify nodes
+                                .distance(80) // Increase distance a bit
+                                .strength(0.6)) // Adjust link strength
+                .force("charge", d3.forceManyBody().strength(-250)) // Repulsion
+                .force("center", d3.forceCenter(width / 2, height / 2)) // Center graph
+                .force("collide", d3.forceCollide().radius(d => d.type === 'Object' || d.type === 'Array' ? 20 : 15)); // Collision based on size/type
+
+            // --- Main container for zoom ---
+            const g = svg.append("g").attr("class", "graph-container");
+
+            // --- Draw Links ---
+            const linkG = g.append("g")
+                .attr("class", "links")
+                .selectAll("g.link") // Select groups for link + label potentially
+                .data(links)
+                .enter().append("g")
+                .attr("class", d => `link spec-type-${d.spec_type} ${d.specifier_complex ? 'spec-complex' : ''}`); // Add classes for styling
+
+            const linkLines = linkG.append("line");
+
+            // --- Draw Link Labels ---
+            // Draw labels AFTER lines so they appear on top if overlapping slightly
+            const linkLabelG = g.append("g")
+                .attr("class", "link-labels")
+                .selectAll("text")
+                .data(links)
+                .enter().append("text")
+                  .text(d => d.label); // Use the pre-computed label from the server
+
+            // --- Draw Nodes ---
+            const nodeG = g.append("g")
+                .attr("class", "nodes")
+                .selectAll("g.node")
+                .data(nodes)
+                .enter().append("g")
+                  .attr("class", "node");
+
+            const nodeCircles = nodeG.append("circle")
+                .attr("r", d => d.type === 'Object' || d.type === 'Array' || d.type === 'Version' ? 12 : 8) // Size based on type
+                .attr("fill", d => getNodeColor(d.type))
+                .call(drag(simulation)); // Attach drag behavior
+
+            // Add tooltips (simple title attribute)
+            nodeCircles.append("title")
+                .text(d => `ID: ${d.id}\nType: ${d.type}\nValue: ${d.label}`);
+
+            // --- Draw Node Labels ---
+            const nodeLabels = nodeG.append("text")
+                .text(d => d.type === 'Object' || d.type === 'Array' || d.type === 'Version' ? d.type : d.label) // Show type for containers, value for primitives
+                .attr("dy", d => (d.type === 'Object' || d.type === 'Array' || d.type === 'Version' ? 20 : 15)); // Position below circle
+
+
+            // --- Tick Function (updates positions) ---
+            simulation.on("tick", () => {
+                linkLines
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                 linkLabelG // Position link labels at the midpoint of the link
+                    .attr("x", d => (d.source.x + d.target.x) / 2)
+                    .attr("y", d => (d.source.y + d.target.y) / 2);
+
+                nodeG // Update group position
+                    .attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+
+             // --- Drag Functionality ---
+             function drag(simulation) {
+                function dragstarted(event, d) {
+                    if (!event.active) simulation.alphaTarget(0.3).restart(); // Heat up simulation
+                    d.fx = d.x; // Fix node position
+                    d.fy = d.y;
+                }
+                function dragged(event, d) {
+                    d.fx = event.x;
+                    d.fy = event.y;
+                }
+                function dragended(event, d) {
+                    if (!event.active) simulation.alphaTarget(0); // Cool down simulation
+                    d.fx = null; // Unfix node position
+                    d.fy = null;
+                }
+                return d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended);
+            }
+
+            // --- Zoom/Pan Functionality ---
+            const zoom = d3.zoom()
+                .scaleExtent([0.1, 8]) // Min/max zoom levels
+                .on("zoom", (event) => {
+                    g.attr("transform", event.transform); // Apply zoom transform to the main container
+                });
+
+            svg.call(zoom);
+
+             // Optional: Initial zoom slightly out if graph is large
+             // svg.call(zoom.transform, d3.zoomIdentity.translate(width/2, height/2).scale(0.8).translate(-width/2, -height/2));
+
+        } // end renderGraph
+
+    </script>
+</body>
+</html>

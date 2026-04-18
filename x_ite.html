@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entity Relationship Visualization with X_ITE</title>
+  <!-- User requested not to change this script element -->
+  <script defer src="https://cdn.jsdelivr.net/npm/x_ite@11.4.2/dist/x_ite.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    #x3d-canvas-container { /* Container for relative positioning */
+        position: relative;
+        width: 1500px; /* Adjust as needed */
+        height: 1000px; /* Adjust as needed */
+        border: 1px solid #ccc; /* Optional: visualize canvas area */
+    }
+    #x3d-canvas {
+       /* Make canvas take full container space */
+      display: block; /* Remove potential extra space */
+      width: 100%;
+      height: 100%;
+      background-color: #f8f8f8; /* Slightly off-white */
+    }
+    .controls {
+      position: absolute;
+      top: 10px; /* Adjusted position */
+      right: 10px;
+      width: 180px;
+      background-color: rgba(255, 255, 255, 0.95); /* Slightly more opaque */
+      padding: 15px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      z-index: 10;
+      max-height: calc(100% - 40px); /* Prevent overflow */
+      overflow-y: auto; /* Allow scrolling if content exceeds height */
+    }
+    .tooltip {
+      position: absolute;
+      /* Position relative to controls */
+      top: 10px;
+      left: 210px; /* Position next to controls */
+      background-color: rgba(245, 245, 245, 0.95); /* Match controls */
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+      font-size: 13px;
+      max-width: 300px;
+      z-index: 20;
+      display: none;
+      border: 1px solid #ddd;
+    }
+    #viewpoint-buttons {
+      margin-top: 10px;
+    }
+    button {
+      margin: 3px 0;
+      padding: 6px 12px;
+      cursor: pointer;
+      width: 100%;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background-color: #f5f5f5;
+      transition: background-color 0.2s ease; /* Smooth hover */
+    }
+    button:hover {
+      background-color: #e0e0e0;
+    }
+    #search-input {
+      width: calc(100% - 12px); /* Adjust for padding */
+      padding: 5px;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    #status {
+      font-size: 12px;
+      margin-top: 10px;
+      padding: 5px;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+      word-wrap: break-word; /* Prevent long messages overflowing */
+    }
+    .legend {
+      margin-top: 15px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+      font-size: 12px;
+    }
+    .legend-color {
+      width: 15px;
+      height: 15px;
+      margin-right: 5px;
+      border-radius: 50%;
+      border: 1px solid #bbb; /* Add a border for light colors */
+      flex-shrink: 0; /* Prevent shrinking */
+    }
+     /* Loading/Error Messages */
+    #message {
+        position: absolute;
+        top: 10px;
+        left: 50%; /* Center horizontally */
+        transform: translateX(-50%);
+        padding: 10px 15px;
+        background-color: rgba(255, 255, 0, 0.85);
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        display: none; /* Hidden by default */
+        z-index: 100; /* Ensure it's on top */
+        text-align: center;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        max-width: 80%;
+    }
+    #message.error {
+        background-color: rgba(220, 53, 69, 0.9); /* Bootstrap danger red */
+        color: white;
+        border-color: #dc3545;
+    }
+    #message.success {
+        background-color: rgba(40, 167, 69, 0.9); /* Bootstrap success green */
+        color: white;
+        border-color: #28a745;
+    }
+    #message.warning {
+        background-color: rgba(255, 193, 7, 0.9); /* Bootstrap warning yellow */
+        color: #212529; /* Dark text for yellow */
+        border-color: #ffc107;
+    }
+  </style>
+</head>
+<body>
+  <div id="message">Loading script...</div>
+
+  <!-- Container for positioning controls/tooltip relative to canvas -->
+  <div id="x3d-canvas-container">
+      <!-- NOTE: Explicit size on the x3d-canvas itself is highly recommended for X_ITE -->
+      <x3d-canvas id="x3d-canvas" width="1500px" height="1000px" touch="true">
+        <X3D profile="Immersive">
+          <Scene id="scene">
+              <!-- Reduced scene to just a Viewpoint and Background for basic X_ITE initialization -->
+            <Background skyColor="0.97 0.97 0.97"></Background>
+            <Viewpoint id="main-viewpoint"
+                      position="0 0 3000"
+                      orientation="0 0 1 0"
+                      centerOfRotation="0 0 0"
+                      description="Main View"></Viewpoint>
+          </Scene>
+        </X3D>
+      </x3d-canvas>
+
+      <div class="controls">
+        <h3 style="margin-top: 0; margin-bottom: 10px;">Graph Controls</h3>
+        <div id="viewpoint-buttons">
+          <button id="reset-view-btn">Reset View</button>
+          <button id="toggle-labels-btn">Toggle Labels</button>
+        </div>
+        <div style="margin-top: 10px;">
+          <label for="search-input">Search Nodes:</label>
+          <input type="text" id="search-input" placeholder="Enter node label">
+          <button id="search-btn">Search</button>
+        </div>
+        <div>
+          <p id="status">Waiting for X_ITE...</p>
+        </div>
+
+        <!-- Legend (unchanged) -->
+        <div class="legend">
+          <h4 style="margin-top: 5px; margin-bottom: 8px;">Node Types</h4>
+          <div class="legend-item"><div class="legend-color" style="background-color: #1f77b4;"></div><span>Object</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #ff7f0e;"></div><span>Array</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #aec7e8;"></div><span>Version</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #2ca02c;"></div><span>String</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #d62728;"></div><span>Number</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #9467bd;"></div><span>Boolean</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #8c564b;"></div><span>Null</span></div>
+          <div class="legend-item"><div class="legend-color" style="background-color: #7f7f7f;"></div><span>Other/Default</span></div>
+        </div>
+      </div>
+
+      <div class="tooltip" id="tooltip"></div>
+  </div>
+
+
+  <script>
+    // Global variables (remove node/link data)
+    let showLabels = true;
+    let selectedNodeId = null; // No initial selection
+    let graphData = { nodes: [], links: [] }; // Will store fetched data
+
+    // DOM element references
+    const messageDiv = document.getElementById('message');
+    const tooltip = document.getElementById('tooltip');
+    const searchInput = document.getElementById('search-input');
+    const statusDisplay = document.getElementById('status');
+    const x3dCanvas = document.getElementById('x3d-canvas'); // Get canvas element
+    const sceneElement = document.getElementById('scene'); // Ensure to use it in the code
+
+    // --- Message Handling Functions (unchanged) ---
+    function showMessage(text, type = 'info', duration = 0) {
+        console.log(`showMessage (${type}):`, text);
+        messageDiv.textContent = text;
+        messageDiv.className = type;
+        messageDiv.style.display = 'block';
+        if (duration > 0) {
+            setTimeout(hideMessage, duration);
+        }
+    }
+    function hideMessage() {
+        messageDiv.style.display = 'none';
+    }
+
+    // --- Initialization ---
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log("DOM Content Loaded. Setting up X_ITE check...");
+        showMessage("Loading X_ITE library...", 'info');
+        statusDisplay.textContent = "Loading X_ITE...";
+
+        if (!x3dCanvas) {
+            showMessage("Critical Error: Could not find X3D canvas element (#x3d-canvas).", 'error');
+            console.error("Could not find X3D canvas element.");
+            statusDisplay.textContent = "Error: Canvas not found.";
+            return;
+        }
+
+        // Check if the 'ready' property exists and is true (might indicate immediate readiness)
+        if (x3dCanvas.ready === true) {
+            console.log("X_ITE reported as already ready.");
+            initializeScene();
+        } else {
+            // Primary way: Listen for the 'ready' event
+            console.log("Adding X_ITE 'ready' event listener.");
+            x3dCanvas.addEventListener('ready', initializeScene, { once: true });
+
+            // Fallback timeout
+            setTimeout(() => {
+                // Check the *property* if it got set
+                if (x3dCanvas.ready !== true) {
+                     console.error("X_ITE ready event timed out or failed to initialize.");
+                     showMessage("Error: X_ITE failed to initialize after 15 seconds. Check browser console (for X3D errors) and network tab (for script loading issues).", 'error');
+                     statusDisplay.textContent = "Error: X_ITE failed.";
+                }
+            }, 15000); // 15 second timeout
+        }
+    });
+
+    // Initialize the scene once X_ITE is ready
+    function initializeScene() {
+      console.log("X_ITE Ready event fired. Initializing Scene...");
+      statusDisplay.textContent = "X_ITE Initialized.";
+      showMessage("X_ITE Initialized.", 'success', 2000);
+
+      // Set up event listeners for controls (no runtime needed)
+      try {
+          document.getElementById('reset-view-btn').addEventListener('click', resetView);
+          document.getElementById('toggle-labels-btn').addEventListener('click', () => toggleLabels());
+          document.getElementById('search-btn').addEventListener('click', searchNodes);
+          searchInput.addEventListener('keyup', (event) => {
+            if (event.key === 'Enter') searchNodes();
+          });
+          console.log("Control event listeners added.");
+      } catch (error) {
+          console.error("Error setting up control listeners:", error);
+          showMessage("Error initializing controls. See console.", 'error');
+          statusDisplay.textContent = "Error: Controls init failed.";
+          return;
+      }
+
+      // Fetch graph data
+      fetchGraphData();
+    }
+
+    // Fetch graph data from API (logic mostly unchanged)
+    function fetchGraphData() {
+      console.log("Fetching graph data from /data...");
+      showMessage("Loading graph data...", 'info');
+      statusDisplay.textContent = "Fetching graph data...";
+
+      fetch('/data')
+          .then(response => {
+               // ... (response handling and error parsing as before) ...
+                console.log("Fetch response received, status:", response.status);
+                if (!response.ok) {
+                    return response.json().then(errData => {
+                        const errorMsg = `Server error ${response.status}: ${errData.error || response.statusText}`;
+                        console.error(errorMsg, errData);
+                        throw new Error(errorMsg);
+                    }).catch((parseError) => {
+                        const errorMsg = `HTTP error ${response.status}: ${response.statusText}. Failed to parse error details.`;
+                        console.error(errorMsg, parseError);
+                        throw new Error(errorMsg);
+                    });
+                }
+                return response.json();
+          })
+          .then(data => {
+              console.log("Graph data received:", data);
+              if (!data || typeof data !== 'object') { throw new Error("Invalid data format: Response is not an object."); }
+              if (!Array.isArray(data.nodes) || !Array.isArray(data.links)) { throw new Error("Invalid data format: Missing 'nodes' or 'links' array."); }
+
+              if (data.nodes.length === 0 && data.links.length === 0) {
+                  showMessage("No data to display.", 'warning', 5000);
+                  statusDisplay.textContent = "No data to display.";
+                  return; // STOP HERE. No need to try render empty scene (could break things)
+              }
+
+              graphData = data;
+              const nodes = graphData.nodes;
+              const links = graphData.links;
+
+              const nodeGroup = document.getElementById('node-group');
+              const linkGroup = document.getElementById('link-group');
+              const labelGroup = document.getElementById('label-group');
+
+              console.log(`Processing ${nodes.length} nodes and ${links.length} links.`);
+
+              const nodeShapes = {};
+              const labelShapes = {};
+
+              try {
+                // Clear the scene
+                 if (nodeGroup) while (nodeGroup.firstChild) nodeGroup.removeChild(nodeGroup.firstChild);
+                 if (linkGroup) while (linkGroup.firstChild) linkGroup.removeChild(linkGroup.firstChild);
+                 if (labelGroup) while (labelGroup.firstChild) labelGroup.removeChild(labelGroup.firstChild);
+                 console.log("Previous scene elements cleared.");
+
+                // Start building new X3D elements
+                const hasPositions = nodes.length > 0 && nodes[0].x !== undefined && nodes[0].y !== undefined && nodes[0].z !== undefined;
+                const needsLayout = nodes.length > 0 && !hasPositions;
+
+                if (needsLayout) {
+                    statusDisplay.textContent = "Calculating 3D graph layout...";
+                    showMessage('Calculating 3D graph layout, this may take a moment.', 'info');
+                    console.log("Nodes lack positions, calculating layout...");
+
+                    // Run calculation
+                    const calculated = calculateLayout(nodes, links);
+                    // Scale
+                    calculated.forEach(node => {
+                        node.x = (node.x || 0) * 9;
+                        node.y = (node.y || 0) * 9;
+                        node.z = (node.z || 0) * 9;
+                    });
+                    graphData.nodes = calculated;
+                    console.log("Layout calculated, start to render to scene.");
+                 } else {
+                      showMessage("Using existing 3D position.", "info");
+                 }
+               } catch (calculationError) {
+                     showMessage("Error during layout calculation. See console.", 'error', 5000);
+               }
+
+               // Rendering
+               const hasPositions = nodes.length > 0 && nodes[0].x !== undefined && nodes[0].y !== undefined && nodes[0].z !== undefined;
+               if (!hasPositions && nodes.length > 0) {
+                     showMessage("Missing node positions cannot start rendering.", 'error', 5000);
+                     return;
+               }
+
+                nodes.forEach(node => {
+                    try {
+                     // Each node needs a Transform, Shape, Appearance and sphere
+                       const nodeTransform = document.createElement('Transform');
+
+                       nodeTransform.setAttribute('translation', `${node.x || 0} ${node.y || 0} ${node.z || 0}`);
+
+                       // Each node needs a Transform, Shape, Appearance and sphere
+                       const shape = document.createElement('Shape');
+
+                       const appearance = document.createElement('Appearance');
+                       const material = document.createElement('Material');
+                       material.setAttribute('diffuseColor', getNodeColor(node.type));
+                       appearance.appendChild(material);
+                       shape.appendChild(appearance);
+
+                       const sphere = document.createElement('Sphere');
+                       sphere.setAttribute('radius', String(getNodeRadius(node)));
+                       shape.setAttribute('subdivision', '12,12');
+                       shape.setAttribute('solid', "false");
+                       shape.setAttribute('containerField', 'children');
+                       shape.setAttribute('ccw', "true");
+                       shape.setAttribute('lit', "true");
+
+                       shape.appendChild(appearance);
+
+                       nodeTransform.appendChild(shape);
+                       nodeGroup.appendChild(nodeTransform);
+                       console.log("Created sphere ok: " + sphere.attributes.length)
+
+                    } catch (renderError) {
+                       showMessage(`Error during node render: ${node.id}.`, 'error', 5000);
+                    }
+                });
+
+                /* links.forEach(link => {
+                    console.log("Link loop");
+                }) */
+
+               console.log("Done rendering graph");
+               statusDisplay.textContent = "Graph rendering complete."
+
+          })
+          .catch(error => {
+              console.error('Error fetching or processing graph data:', error);
+              showMessage(`Error loading data: ${error.message}`, 'error');
+              statusDisplay.textContent = `Error: ${error.message}`;
+          });
+    }
+
+    // Force-directed layout calculation (3D) (unchanged)
+    function calculateLayout(nodesToLayout, linksToLayout) {
+         console.log("Starting layout calculation...");
+        if (!nodesToLayout || nodesToLayout.length === 0) { return []; }
+        const width = 800, height = 600, depth = 400, iterations = 100;
+        const k = nodesToLayout.length > 0 ? Math.sqrt((width * height * depth) / nodesToLayout.length) : 100;
+        let temp = width / 10;
+        const nodeMap = new Map(nodesToLayout.map(node => [node.id, node]));
+        nodesToLayout.forEach(node => {
+            if (node.x === undefined) { node.x = Math.random() * width - width / 2; }
+            if (node.y === undefined) { node.y = Math.random() * height - height / 2; }
+            if (node.z === undefined) { node.z = Math.random() * depth - depth / 2; }
+            node.dx = 0; node.dy = 0; node.dz = 0;
+        });
+        for (let i = 0; i < iterations; i++) {
+            // Repulsive forces
+            for (let j = 0; j < nodesToLayout.length; j++) {
+                const node1 = nodesToLayout[j];
+                node1.dx = 0; node1.dy = 0; node1.dz = 0;
+                for (let l = 0; l < nodesToLayout.length; l++) {
+                    if (j === l) continue;
+                    const node2 = nodesToLayout[l];
+                    const dx = node1.x - node2.x, dy = node1.y - node2.y, dz = node1.z - node2.z;
+                    const distSq = (dx * dx + dy * dy + dz * dz) || 1e-6;
+                    const dist = Math.sqrt(distSq);
+                    const repulsiveForce = (k * k) / dist;
+                    const factor = repulsiveForce / dist;
+                    node1.dx += dx * factor; node1.dy += dy * factor; node1.dz += dz * factor;
+                }
+            }
+            // Attractive forces
+            linksToLayout.forEach(link => {
+                const source = nodeMap.get(link.source), target = nodeMap.get(link.target);
+                if (source && target) {
+                    const dx = target.x - source.x, dy = target.y - source.y, dz = target.z - source.z;
+                    const distSq = (dx * dx + dy * dy + dz * dz) || 1e-6;
+                    const dist = Math.sqrt(distSq);
+                    const attractiveForce = (dist * dist) / k;
+                    const factor = attractiveForce / dist;
+                    const fx = dx * factor, fy = dy * factor, fz = dz * factor;
+                    source.dx = (source.dx || 0) + fx; source.dy = (source.dy || 0) + fy; source.dz = (source.dz || 0) + fz;
+                    target.dx = (target.dx || 0) - fx; target.dy = (target.dy || 0) - fy; target.dz = (target.dz || 0) - fz;
+                }
+            });
+            // Apply displacement
+            nodesToLayout.forEach(node => {
+                 const dispMagSq = (node.dx * node.dx + node.dy * node.dy + node.dz * node.dz) || 0;
+                 if (dispMagSq > 0) {
+                    const dispMag = Math.sqrt(dispMagSq);
+                    const limitedDispMag = Math.min(dispMag, temp);
+                    const factor = limitedDispMag / dispMag;
+                    node.x += node.dx * factor; node.y += node.dy * factor; node.z += node.dz * factor;
+                 }
+            });
+            if (temp > 0.1) temp *= 0.99;
+        }
+        console.log("Layout calculation finished.");
+        return nodesToLayout;
+    }
+
+    // Color functions
+    function getNodeColor(nodeType) {
+        switch (nodeType) {
+            case 'Object': return '0.12 0.47 0.71';
+            case 'Array': return '1.00 0.50 0.05';
+            case 'Version': return '0.68 0.78 0.91';
+            case 'String': return '0.17 0.63 0.17';
+            case 'Number': return '0.84 0.15 0.16';
+            case 'Boolean': return '0.58 0.40 0.74';
+            case 'Null': return '0.55 0.34 0.29';
+            default: return '0.50 0.50 0.50';
+        }
+    }
+    function getNodeRadius(node) {
+        switch (node.type) {
+            case 'Object':
+            case 'Array':
+            case 'Version':
+                return 18;
+            case 'String':
+            case 'Number':
+            case 'Boolean':
+            case 'Null':
+                return 12;
+            default:
+                return 10;
+        }
+    }
+
+   // All the View functions
+    function resetView(silent = false) {
+        console.log("Resetting view using DOM attributes...");
+        const viewpoint = document.getElementById('main-viewpoint');
+        if (!viewpoint) {
+             console.error("Reset view failed: Viewpoint element not found."); return;
+        }
+        const defaultPosition = '0 0 3000';
+        const defaultOrientation = '0 0 1 0';
+        const defaultCenter = '0 0 0';
+
+        try {
+            viewpoint.setAttribute('position', defaultPosition);
+            viewpoint.setAttribute('orientation', defaultOrientation);
+            viewpoint.setAttribute('centerOfRotation', defaultCenter);
+            console.log("Viewpoint attributes reset.");
+        } catch (error) {
+            console.error("Error resetting viewpoint attributes:", error);
+        }
+
+        tooltip.style.display = 'none'; // Hide tooltip
+
+        if (!silent) {
+            statusDisplay.textContent = 'View reset.';
+            showMessage("View reset.", 'info', 2000);
+        }
+    }
+     // Function to explicitly set label visibility
+    function setLabelVisibility(visible) {
+        const scaleValue = visible ? '1 1 1' : '0 0 0';
+        console.log(`Setting label visibility scale to: ${scaleValue}`);
+
+        const labelGroup = document.getElementById('label-group');
+        if (labelGroup) {
+            const labelTransforms = labelGroup.querySelectorAll('Transform');
+
+            labelTransforms.forEach(labelTransform => {
+                if (labelTransform) {
+                    labelTransform.setAttribute('scale', scaleValue);
+                }
+            });
+        }
+    }
+
+    function toggleLabels() {
+        showLabels = !showLabels;
+        console.log(`Toggling labels. New state: ${showLabels ? 'Visible' : 'Hidden'}`);
+        setLabelVisibility(showLabels);
+        statusDisplay.textContent = `Labels ${showLabels ? 'shown' : 'hidden'}`;
+        document.getElementById('toggle-labels-btn').textContent = showLabels ? 'Hide Labels' : 'Show Labels';
+    }
+    // Search functions
+    function searchNodes() {
+        const searchTerm = searchInput.value.trim().toLowerCase();
+        console.log("Search function. " + searchTerm)
+    }
+
+  </script>
+</body>
+</html>

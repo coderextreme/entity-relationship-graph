@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB Graph Visualization</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            overflow: hidden; /* Prevent scrollbars from graph */
+        }
+        svg {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        .links line {
+            stroke: #999;
+            stroke-opacity: 0.6;
+            stroke-width: 1.5px;
+        }
+        .nodes circle {
+            stroke: #fff;
+            stroke-width: 1.5px;
+        }
+        .labels text {
+            font-size: 10px;
+            fill: #333;
+            pointer-events: none; /* Labels don't block dragging */
+            text-anchor: middle;
+            dominant-baseline: central;
+        }
+        /* Optional: Style link labels */
+        .link-labels text {
+             font-size: 8px;
+             fill: #666;
+             pointer-events: none;
+             text-anchor: middle;
+        }
+    </style>
+</head>
+<body>
+    <svg id="graph-container"></svg>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        const svg = d3.select("#graph-container");
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        // Color scale for node types
+        const color = d3.scaleOrdinal(d3.schemeCategory10);
+
+        // Fetch data and render graph
+        d3.json("/data").then(graph => {
+            if (!graph || !graph.nodes || !graph.links) {
+                console.error("Invalid data received from server:", graph);
+                svg.append("text")
+                   .attr("x", width / 2)
+                   .attr("y", height / 2)
+                   .attr("text-anchor", "middle")
+                   .text("Error loading graph data.");
+                return;
+            }
+
+            const links = graph.links;
+            const nodes = graph.nodes;
+
+            // --- Force Simulation ---
+            const simulation = d3.forceSimulation(nodes)
+                .force("link", d3.forceLink(links).id(d => d.id).distance(50)) // Link nodes by id, set distance
+                .force("charge", d3.forceManyBody().strength(-60)) // Repulsion/Attraction
+                .force("center", d3.forceCenter(width / 2, height / 2)) // Center the graph
+                .force("collide", d3.forceCollide().radius(15)); // Prevent nodes overlapping too much
+
+
+            // --- Draw Links ---
+            const link = svg.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(links)
+                .join("line");
+
+            // --- Optional: Draw Link Labels (e.g., relationship keys/indices) ---
+            const linkLabel = svg.append("g")
+                 .attr("class", "link-labels")
+                 .selectAll("text")
+                 .data(links)
+                 .join("text")
+                 .text(d => d.label || (d.index !== undefined ? d.index : '')); // Show key or index
+
+            // --- Draw Nodes ---
+            const node = svg.append("g")
+                .attr("class", "nodes")
+                .selectAll("circle")
+                .data(nodes)
+                .join("circle")
+                .attr("r", 7) // Node radius
+                .attr("fill", d => color(d.type)) // Color by type
+                .call(drag(simulation)); // Enable dragging
+
+            // Add tooltips (simple title attribute)
+            node.append("title")
+                .text(d => `ID: ${d.id}\nType: ${d.type}\nValue: ${JSON.stringify(d.value)}`);
+
+            // --- Draw Node Labels ---
+            const label = svg.append("g")
+                .attr("class", "labels")
+                .selectAll("text")
+                .data(nodes)
+                .join("text")
+                // Display value for primitives, or type/ID for containers
+                .text(d => d.label || `${d.type}:${d.id}`)
+                .attr("dy", -12); // Offset label slightly above node
+
+            // --- Simulation Tick Function ---
+            function ticked() {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("cx", d => d.x)
+                    .attr("cy", d => d.y);
+
+                label
+                    .attr("x", d => d.x)
+                    .attr("y", d => d.y);
+
+                // Position link labels in the middle
+                linkLabel
+                    .attr("x", d => (d.source.x + d.target.x) / 2)
+                    .attr("y", d => (d.source.y + d.target.y) / 2);
+            }
+
+            simulation.on("tick", ticked);
+
+            // --- Drag Functions ---
+            function drag(simulation) {
+                function dragstarted(event, d) {
+                    if (!event.active) simulation.alphaTarget(0.3).restart(); // Heat up simulation
+                    d.fx = d.x; // Fix node position
+                    d.fy = d.y;
+                }
+                function dragged(event, d) {
+                    d.fx = event.x;
+                    d.fy = event.y;
+                }
+                function dragended(event, d) {
+                    if (!event.active) simulation.alphaTarget(0); // Cool down simulation
+                    d.fx = null; // Unfix node position
+                    d.fy = null;
+                }
+                return d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended);
+            }
+
+            // --- Optional: Zooming/Panning ---
+             const zoom = d3.zoom()
+                 .scaleExtent([0.1, 4]) // Min/max zoom levels
+                 .on("zoom", (event) => {
+                     svg.selectAll('g').attr('transform', event.transform); // Apply zoom transform to groups
+                 });
+             svg.call(zoom);
+
+
+        }).catch(error => {
+            console.error("Error fetching or processing graph data:", error);
+            svg.append("text")
+               .attr("x", width / 2)
+               .attr("y", height / 2)
+               .attr("text-anchor", "middle")
+               .text("Failed to load graph data. Check console and PHP logs.");
+        });
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+Please create a system for storing and retrieving arbitrary Python object graphs (representing potentially complex JavaScript-like data structures) using an SQLite database. The system should handle imports from single files (.py, .json) or from a directory hierarchy containing such files. It should consist of three Python scripts: schema creation, data import, and data export.
+
+I. Database Schema (generic_store.db)
+
+Design an SQLite schema with three tables: EntityType, Entity, and Relationship.
+
+EntityType Table:
+
+Columns: id (INTEGER PRIMARY KEY AUTOINCREMENT), name (TEXT UNIQUE NOT NULL).
+
+Initial Data: Must contain 'Object', 'Array', 'Version', 'String', 'Number', 'Boolean', 'Null'.
+
+Entity Table:
+
+Columns: id, entity_type_id (FK), value_str, value_num, value_bool.
+
+Purpose: Represents every node. Value columns NULL for containers ('Object', 'Array', 'Version').
+
+Relationship Table:
+
+Columns: id, parent_entity_id (FK), child_entity_id (FK), relationship_specifier_id (FK).
+
+Purpose: Defines graph structure. child_entity_id and relationship_specifier_id can reference any Entity type.
+
+For 'Version' parents, specifiers can be 'String' or 'Number'.
+
+Constraints: UNIQUE(parent_entity_id, relationship_specifier_id).
+
+II. Python Scripts
+
+Create three separate Python 3 scripts using sqlite3.
+
+create_schema.py:
+
+Creates/recreates the DB file (e.g., generic_store.db).
+
+Executes CREATE TABLE statements.
+
+Enforces foreign keys.
+
+Populates EntityType table.
+
+Creates indexes.
+
+import_data.py:
+
+Accepts an input path (file or directory) via argparse.
+
+Connects to the database.
+
+Input Handling:
+
+If input path is a file (.py or .json):
+
+Load the data structure from the file (importlib for .py, json.load for .json).
+
+Call a recursive function import_node to traverse and import this single data structure. The root entity ID of this structure will be the result.
+
+If input path is a directory:
+
+Implement a function import_directory to handle the hierarchy.
+
+Create a root 'Object' entity in the DB representing the top-level directory.
+
+Use os.walk to traverse the directory tree starting from the input path.
+
+Maintain a cache mapping directory paths to their corresponding 'Object' entity IDs in the database.
+
+For each directory visited:
+
+Find the parent directory's entity ID from the cache.
+
+Create 'Object' entities for immediate subdirectories found (dirnames), add them to the path cache, and create relationships linking the parent directory entity to the subdirectory entity, using the subdirectory name ('String' entity) as the specifier.
+
+For each file (filename) in the current directory:
+
+If it's a .py or .json file:
+
+Load the content (handle errors gracefully, e.g., skip file with warning).
+
+Recursively import the loaded content using import_node, obtaining the content_entity_id.
+
+Determine the specifier: use the filename without the extension (e.g., os.path.splitext(filename)[0]) as a string. Import this specifier string as a 'String' entity.
+
+Create a relationship linking the current directory's entity (parent) to the content_entity_id (child), using the filename-based specifier entity.
+
+If it's any other file type: Ignore it.
+
+The root entity ID of the top-level directory object will be the result.
+
+import_node Function (Recursive):
+
+Handles the import of a single Python object graph (used directly for single file input or for file contents during directory import).
+
+Maps Python types to DB EntityType (dict->'Object', list->'Array', collections.OrderedDict->'Version', tuple->'Array'/'Tuple', primitives). Raise TypeError for unsupported types within loaded data.
+
+Inserts into Entity.
+
+Uses id(node) -> entity_id cache within its own scope for identity/cycles within the structure being imported (distinct from the directory path cache).
+
+Creates Relationship rows for container types as previously defined (Object keys, Array indices, Version keys).
+
+Use database transactions for the entire import process (whether single file or directory).
+
+export_data.py:
+
+Accepts output file path, optional database path, and --format (pickle, pprint, javascript/js, d3json). Default 'pickle'.
+
+Connects to the database.
+
+Finds a root entity (e.g., one not appearing as child_entity_id). Note: If multiple imports were done, or only directory import, this root might be the entity for the top-level directory.
+
+For 'pickle', 'pprint', 'javascript':
+
+Implements rebuild_node using caching (entity_id -> object) for sharing/cycles. Rebuilds the structure starting from the found root.
+
+Reconstructs Python objects (dict, list/list-of-pairs, OrderedDict) based on DB types.
+
+Handle non-hashable keys/specifiers and non-standard array structures with warnings during reconstruction.
+
+Perform export based on format:
+
+'pickle': pickle.dump() the rebuilt object.
+
+'pprint': pprint.pformat() the rebuilt object.
+
+'javascript': Serialize rebuilt object to JS literal string. Convert non-string keys to strings (str(key)) with warning. Handle non-standard arrays. Handle cycles/sharing (specify error or placeholder). Write JS code to file.
+
+'d3json': Query DB directly for all Entities (nodes) and all Relationships (links). Add type/value info to nodes. Add specifier info (value or type/id) to links. Output {"nodes": [...], "links": [...]} using json.dump(). This represents the entire stored graph, not just one hierarchy.
+
+Ensure all scripts include necessary imports (os, json, importlib, collections, pickle, pprint), robust error handling (file/dir access, load errors, DB errors, type errors), clear user feedback, command-line usability, and comments explaining logic, especially the directory traversal and the different export strategies.

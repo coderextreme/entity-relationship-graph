@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Enhanced 3D Entity Relationship Visualization</title>
+  <script type="text/javascript" src="https://create3000.github.io/code/x_ite/latest/dist/x_ite.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+    }
+    #x3d-canvas {
+      width: 900px;
+      height: 600px;
+      background-color: #f9f9f9;
+      padding-left: 110px;
+    }
+    #x3d-container {
+      width: 600vw;
+      height: 600vh;
+      background-color: #f9f9f9;
+      /* Add padding to move graph away from legend */
+      padding-left: 110px;
+    }
+    .controls {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 180px;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 15px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      z-index: 10;
+    }
+    .tooltip {
+      position: absolute;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      pointer-events: none;
+      font-size: 13px;
+      max-width: 300px;
+      z-index: 20;
+      display: none;
+    }
+    #relationship-info {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 220px;
+      background-color: rgba(255, 255, 255, 0.9);
+      padding: 10px;
+      border-radius: 5px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+      font-size: 13px;
+      z-index: 20;
+      max-height: 300px;
+      overflow-y: auto;
+      display: none;
+    }
+    #viewpoint-buttons {
+      margin-top: 10px;
+    }
+    button {
+      margin: 3px 0;
+      padding: 6px 12px;
+      cursor: pointer;
+      width: 100%;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      background-color: #f5f5f5;
+    }
+    button:hover {
+      background-color: #e0e0e0;
+    }
+    #search-input {
+      width: calc(100% - 10px);
+      padding: 5px;
+      margin-top: 5px;
+      margin-bottom: 5px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+    #status {
+      font-size: 12px;
+      margin-top: 10px;
+      padding: 5px;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+    }
+    .legend {
+      margin-top: 15px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+      font-size: 12px;
+    }
+    .legend-color {
+      width: 15px;
+      height: 15px;
+      margin-right: 5px;
+      border-radius: 50%;
+    }
+    .relationship-type {
+      margin-top: 15px;
+      border-top: 1px solid #ccc;
+      padding-top: 10px;
+    }
+    .relationship-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+      font-size: 12px;
+    }
+    .relationship-line {
+      width: 20px;
+      height: 2px;
+      margin-right: 5px;
+    }
+    .highlighted-relationship {
+      font-weight: bold;
+      color: #1f77b4;
+    }
+    .connected-nodes-list {
+      margin-top: 10px;
+      max-height: 150px;
+      overflow-y: auto;
+      border-top: 1px solid #eee;
+      padding-top: 5px;
+    }
+    .connected-node-item {
+      padding: 2px 0;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .connected-node-item:hover {
+      text-decoration: underline;
+      color: #1f77b4;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <h3 style="margin-top: 0; margin-bottom: 10px;">Graph Controls</h3>
+    <div id="viewpoint-buttons">
+      <button id="reset-view-btn">Reset View</button>
+      <button id="toggle-labels-btn">Toggle Labels</button>
+      <button id="toggle-arcs-btn">Toggle Arc Labels</button>
+    </div>
+    <div style="margin-top: 10px;">
+      <label for="search-input">Search Nodes:</label>
+      <input type="text" id="search-input" placeholder="Enter node label">
+      <button id="search-btn">Search</button>
+    </div>
+    <div>
+      <p id="status">Loading graph data...</p>
+    </div>
+
+    <!-- Node type legend -->
+    <div class="legend">
+      <h4 style="margin-top: 5px; margin-bottom: 8px;">Node Types</h4>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(31, 120, 181);"></div>
+        <span>Object</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(255, 127, 14);"></div>
+        <span>Array</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(44, 160, 44);"></div>
+        <span>Text</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(214, 39, 40);"></div>
+        <span>Integer</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(148, 103, 189);"></div>
+        <span>Boolean</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(140, 86, 75);"></div>
+        <span>Real/Numeric</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background-color: rgb(227, 119, 194);"></div>
+        <span>Null</span>
+      </div>
+    </div>
+
+    <!-- Relationship type legend -->
+    <div class="relationship-type">
+      <h4 style="margin-top: 5px; margin-bottom: 8px;">Relationship Types</h4>
+      <div class="relationship-item">
+        <div class="relationship-line" style="background-color: rgb(255, 127, 14);"></div>
+        <span>Array Element</span>
+      </div>
+      <div class="relationship-item">
+        <div class="relationship-line" style="background-color: rgb(31, 120, 181);"></div>
+        <span>Has Property</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Relationship info panel -->
+  <div id="relationship-info">
+    <h3 style="margin-top: 0; margin-bottom: 10px;">Relationship Details</h3>
+    <div id="relationship-details">
+      Select a node to see its relationships
+    </div>
+    <div class="connected-nodes-list" id="connected-nodes-list"></div>
+  </div>
+
+  <div id="x3d-container">
+    <x3d-canvas id="x3d-canvas" touch="true">
+      <X3D profile="Immersive">
+        <Scene id="scene">
+          <Background skyColor="0.97 0.97 0.97"></Background>
+          <Viewpoint id="main-viewpoint"
+                    position="0 0 3000"
+                    orientation="0 0 1 0"
+                    centerOfRotation="0 0 0"
+                    description="Main View"></Viewpoint>
+          <NavigationInfo type='"EXAMINE" "ANY"' headlight="true"></NavigationInfo>
+          <Group id="node-group"></Group>
+          <Group id="link-group"></Group>
+          <Group id="label-group"></Group>
+          <Group id="arc-label-group"></Group>
+          <Group id="arrow-group"></Group>
+        </Scene>
+      </X3D>
+    </x3d-canvas>
+  </div>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    // Global variables
+    let showLabels = true;
+    let showArcLabels = true;
+    let nodes = [], links = [];
+    let nodeShapes = {}, linkShapes = {}, labelShapes = {}, arcLabelShapes = {};
+    let selectedNodeId = null;
+    let highlightedLinks = new Set();
+
+    // DOM element references
+    const tooltip = document.getElementById('tooltip');
+    const relationshipInfo = document.getElementById('relationship-info');
+    const relationshipDetails = document.getElementById('relationship-details');
+    const connectedNodesList = document.getElementById('connected-nodes-list');
+    const searchInput = document.getElementById('search-input');
+    const statusDisplay = document.getElementById('status');
+    const sceneElement = document.getElementById('scene');
+    const nodeGroup = document.getElementById('node-group');
+    const linkGroup = document.getElementById('link-group');
+    const labelGroup = document.getElementById('label-group');
+    const arcLabelGroup = document.getElementById('arc-label-group');
+    const arrowGroup = document.getElementById('arrow-group');
+
+    // Node type color mapping (RGB values for the legend to match)
+    const colorMap = {
+      'OBJECT': '0.12 0.47 0.71',  // Blue
+      'ARRAY': '1.0 0.5 0.05',     // Orange
+      'TEXT': '0.17 0.63 0.17',    // Green
+      'INTEGER': '0.84 0.15 0.16', // Red
+      'BOOLEAN': '0.58 0.4 0.74',  // Purple
+      'REAL': '0.55 0.34 0.29',    // Brown
+      'NUMERIC': '0.55 0.34 0.29', // Brown
+      'NULL': '0.89 0.47 0.76'     // Pink
+    };
+
+    // Relationship type color mapping
+    const relationshipColorMap = {
+      'ARRAY_ELEMENT': '1.0 0.5 0.05',  // Orange
+      'HAS_PROPERTY': '0.12 0.47 0.71', // Blue
+      'DEFAULT': '0.5 0.5 0.5'          // Gray
+    };
+
+    // Initialize X3D scene
+    window.addEventListener('load', function() {
+      // Wait for the X3D canvas to be fully initialized
+      const x3dCanvas = document.querySelector('x3d-canvas');
+
+      // Check if X_ITE browser is available
+      if (X3D) {
+        initializeScene();
+      } else {
+        // If not available immediately, wait for it to be ready
+        x3dCanvas.addEventListener('x3d-canvas-ready', function() {
+          initializeScene();
+        });
+      }
+    });
+
+    // Initialize the scene once the browser is ready
+    function initializeScene() {
+      // Set up event listeners
+      document.getElementById('reset-view-btn').addEventListener('click', resetView);
+      document.getElementById('toggle-labels-btn').addEventListener('click', toggleLabels);
+      document.getElementById('toggle-arcs-btn').addEventListener('click', toggleArcLabels);
+      document.getElementById('search-btn').addEventListener('click', searchNodes);
+      searchInput.addEventListener('keyup', (event) => {
+        if (event.key === 'Enter') searchNodes();
+      });
+
+      // Fetch graph data from server
+      fetchGraphData();
+    }
+
+    // Fetch graph data from API
+    function fetchGraphData() {
+      statusDisplay.textContent = "Fetching graph data from server...";
+
+      fetch('/api/graph')
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+          return response.json();
+        })
+        .then(data => {
+          nodes = data.nodes;
+          links = data.links;
+
+          // Pre-process links to ensure they have propertyLabel
+          links = links.map(link => {
+            if (!link.propertyLabel) {
+              // Generate a property label based on type if none exists
+              if (link.type === 'ARRAY_ELEMENT') {
+                link.propertyLabel = 'element';
+              } else if (link.type === 'HAS_PROPERTY') {
+                link.propertyLabel = 'property';
+              } else {
+                link.propertyLabel = link.type.toLowerCase().replace(/_/g, ' ');
+              }
+            }
+            return link;
+          });
+
+          // If nodes don't have x,y,z positions, calculate a layout
+          const hasPositions = nodes.length > 0 && nodes[0].x !== undefined;
+          if (!hasPositions) {
+            statusDisplay.textContent = "Calculating graph layout...";
+            nodes = calculateLayout(nodes, links);
+          }
+
+          // Scale up the layout to make the graph bigger in each direction
+          nodes.forEach(node => {
+            node.x *= 9;
+            node.y *= 9;
+            node.z *= 9;
+          });
+
+          // Ensure links have source and target as IDs (not objects)
+          links = links.map(link => ({
+            ...link,
+            source: typeof link.source === 'object' ? link.source.id : link.source,
+            target: typeof link.target === 'object' ? link.target.id : link.target
+          }));
+
+          // Render the graph
+          renderGraph();
+          statusDisplay.textContent = `Graph rendered with ${nodes.length} nodes and ${links.length} links. Use mouse to rotate, scroll to zoom.`;
+        })
+        .catch(error => {
+          console.error('Error fetching graph data:', error);
+          statusDisplay.textContent = `Error fetching graph data: ${error.message}. Please try again.`;
+        });
+    }
+
+    // Force-directed layout calculation
+    function calculateLayout(nodes, links) {
+      // Constants for forces
+      const repulsionForce = 500;
+      const attractionForce = 0.1;
+      const centeringForce = 0.05;
+      const iterations = 100;
+
+      // Initialize random positions if not already set
+      nodes.forEach(node => {
+        if (!node.x && !node.y && !node.z) {
+          node.x = Math.random() * 400 - 200;
+          node.y = Math.random() * 400 - 200;
+          node.z = Math.random() * 100 - 50;
+        }
+      });
+
+      // Run iterations
+      for (let i = 0; i < iterations; i++) {
+        // Calculate repulsion forces between all nodes
+        for (let j = 0; j < nodes.length; j++) {
+          for (let k = j + 1; k < nodes.length; k++) {
+            const node1 = nodes[j];
+            const node2 = nodes[k];
+
+            // Calculate distance
+            const dx = node2.x - node1.x;
+            const dy = node2.y - node1.y;
+            const dz = node2.z - node1.z;
+            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+
+            // Repulsion force (inversely proportional to distance)
+            const force = repulsionForce / (distance * distance);
+
+            // Apply force to both nodes in opposite directions
+            const fx = (dx / distance) * force;
+            const fy = (dy / distance) * force;
+            const fz = (dz / distance) * force;
+
+            node1.x -= fx;
+            node1.y -= fy;
+            node1.z -= fz;
+
+            node2.x += fx;
+            node2.y += fy;
+            node2.z += fz;
+          }
+        }
+
+        // Calculate attraction forces between linked nodes
+        links.forEach(link => {
+          const source = nodes.find(n => n.id === link.source);
+          const target = nodes.find(n => n.id === link.target);
+
+          if (source && target) {
+            // Calculate distance
+            const dx = target.x - source.x;
+            const dy = target.y - source.y;
+            const dz = target.z - source.z;
+            const distance = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+
+            // Attraction force (proportional to distance)
+            const force = distance * attractionForce;
+
+            // Apply force to both nodes to bring them closer
+            const fx = (dx / distance) * force;
+            const fy = (dy / distance) * force;
+            const fz = (dz / distance) * force;
+
+            source.x += fx;
+            source.y += fy;
+            source.z += fz;
+
+            target.x -= fx;
+            target.y -= fy;
+            target.z -= fz;
+          }
+        });
+
+        // Apply centering force to prevent nodes from drifting too far
+        nodes.forEach(node => {
+          node.x -= node.x * centeringForce;
+          node.y -= node.y * centeringForce;
+          node.z -= node.z * centeringForce;
+        });
+      }
+
+      return nodes;
+    }
+
+    // Render graph nodes and links
+    function renderGraph() {
+      // Clear existing nodes and links
+      while (nodeGroup.firstChild) nodeGroup.removeChild(nodeGroup.firstChild);
+      while (linkGroup.firstChild) linkGroup.removeChild(linkGroup.firstChild);
+      while (labelGroup.firstChild) labelGroup.removeChild(labelGroup.firstChild);
+      while (arcLabelGroup.firstChild) arcLabelGroup.removeChild(arcLabelGroup.firstChild);
+      while (arrowGroup.firstChild) arrowGroup.removeChild(arrowGroup.firstChild);
+
+      // Reset collections
+      nodeShapes = {};
+      linkShapes = {};
+      labelShapes = {};
+      arcLabelShapes = {};
+
+      // Create nodes
+      nodes.forEach(node => {
+        // Create sphere for node
+        const nodeSphere = document.createElement('Transform');
+        nodeSphere.setAttribute('translation', `${node.x} ${node.y} ${node.z}`);
+        nodeSphere.setAttribute('data-id', node.id);
+
+        const shape = document.createElement('Shape');
+
+        const appearance = document.createElement('Appearance');
+        const material = document.createElement('Material');
+        material.setAttribute('diffuseColor', colorMap[node.type] || '0.5 0.5 0.5');
+        material.setAttribute('transparency', '0.0'); // Start fully opaque
+        appearance.appendChild(material);
+
+        const sphere = document.createElement('Sphere');
+        sphere.setAttribute('radius', getNodeRadius(node));
+
+        shape.appendChild(appearance);
+        shape.appendChild(sphere);
+        nodeSphere.appendChild(shape);
+
+        // Add touch sensor for interaction
+        const touchSensor = document.createElement('TouchSensor');
+        touchSensor.setAttribute('description', `Node: ${node.label}`);
+        touchSensor.addEventListener('isActive', (event) => {
+          if (event.value) {
+            handleNodeClick(node);
+          }
+        });
+        nodeSphere.appendChild(touchSensor);
+
+        nodeGroup.appendChild(nodeSphere);
+        nodeShapes[node.id] = nodeSphere;
+
+        // Create label for node
+        createNodeLabel(node);
+      });
+
+      // Create links (as line sets)
+      links.forEach((link, index) => {
+        const sourceNode = nodes.find(n => n.id === link.source);
+        const targetNode = nodes.find(n => n.id === link.target);
+
+        if (sourceNode && targetNode) {
+          // Create line for link
+          const linkTransform = document.createElement('Transform');
+          linkTransform.setAttribute('data-source', link.source);
+          linkTransform.setAttribute('data-target', link.target);
+          linkTransform.setAttribute('data-type', link.type);
+          linkTransform.setAttribute('data-index', index);
+
+          const shape = document.createElement('Shape');
+
+          const appearance = document.createElement('Appearance');
+          const material = document.createElement('Material');
+
+          // Set color based on relationship type
+          const relationshipColor = relationshipColorMap[link.type] || relationshipColorMap.DEFAULT;
+          material.setAttribute('emissiveColor', relationshipColor);
+
+          appearance.appendChild(material);
+
+          const lineSet = document.createElement('LineSet');
+
+          // Create coordinate points for the line
+          const coordinates = document.createElement('Coordinate');
+          coordinates.setAttribute('point',
+            `${sourceNode.x} ${sourceNode.y} ${sourceNode.z}, ${targetNode.x} ${targetNode.y} ${targetNode.z}`
+          );
+
+          // Create line indices
+          lineSet.setAttribute('vertexCount', '2');
+
+          lineSet.appendChild(coordinates);
+          shape.appendChild(appearance);
+          shape.appendChild(lineSet);
+          linkTransform.appendChild(shape);
+
+          linkGroup.appendChild(linkTransform);
+          linkShapes[`${link.source}-${link.target}-${index}`] = linkTransform;
+
+          // Create arrow for directed relationship
+          createArrow(sourceNode, targetNode, link);
+
+          // Create property label for link
+          createArcLabel(link, sourceNode, targetNode, index);
+        }
+      });
+
+      // Center the view on the graph
+      resetView();
+    }
+
+    // Create arrow to show relationship direction
+    function createArrow(source, target, link) {
+      // Calculate direction vector
+      const dx = target.x - source.x;
+      const dy = target.y - source.y;
+      const dz = target.z - source.z;
+
+      // Calculate distance
+      const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+
+      if (distance === 0) return; // Skip if nodes are at the same position
+
+      // Normalize direction vector
+      const nx = dx / distance;
+      const ny = dy / distance;
+      const nz = dz / distance;
+
+      // Position the arrow slightly closer to the target node (to point to the edge of the sphere)
+      let arrowScale = 1 - (getNodeRadius(target) / distance);  // Arrow base to target node sphere radius
+
+      // Ensure arrowScale remains positive (arrow isn't placed inside the target node)
+      arrowScale = Math.max(0.1, arrowScale);
+
+      // Calculate position for arrow
+      const arrowX = source.x + dx * arrowScale;
+      const arrowY = source.y + dy * arrowScale;
+      const arrowZ = source.z + dz * arrowScale;
+
+      // Create arrow as a cone
+      const arrowTransform = document.createElement('Transform');
+
+      // Position at calculated point
+      arrowTransform.setAttribute('translation', `${arrowX} ${arrowY} ${arrowZ}`);
+
+      // Calculate rotation to point along the line
+      // First find rotation axis (cross product of (0,0,1) and direction vector)
+      let ax = -ny;
+      let ay = nx;
+      let az = 0;
+
+      // If direction is parallel to z-axis, use x-axis for rotation
+      const parallelToZ = Math.abs(nx) < 0.00001 && Math.abs(ny) < 0.00001;
+      if (parallelToZ) {
+        ax = 1;
+        ay = 0;
+        az = 0;
+      }
+
+      // Normalize rotation axis
+      const axisLength = Math.sqrt(ax * ax + ay * ay + az * az);
+      if (axisLength > 0) {
+        ax /= axisLength;
+        ay /= axisLength;
+        az /= axisLength;
+      }
+
+      // Calculate rotation angle
+      const dotProduct = nz; // Dot product of (0,0,1) and direction vector
+      const angle = Math.acos(dotProduct);
+
+      // Set rotation
+      arrowTransform.setAttribute('rotation', `${ax} ${ay} ${az} ${angle}`);
+
+      // Create arrow shape
+      const shape = document.createElement('Shape');
+
+      const appearance = document.createElement('Appearance');
+      const material = document.createElement('Material');
+
+      // Set color based on relationship type
+      const relationshipColor = relationshipColorMap[link.type] || relationshipColorMap.DEFAULT;
+      material.setAttribute('diffuseColor', relationshipColor);
+
+      appearance.appendChild(material);
+
+      // Adjust the cone to be smaller and point in the right direction
+      const cone = document.createElement('Cone');
+      cone.setAttribute('height', '15'); // Arrow length
+      cone.setAttribute('bottomRadius', '5'); // Arrow width
+
+      shape.appendChild(appearance);
+      shape.appendChild(cone);
+      arrowTransform.appendChild(shape);
+
+      arrowGroup.appendChild(arrowTransform);
+    }
+
+    // Create node label
+    function createNodeLabel(node) {
+      const labelTransform = document.createElement('Transform');
+      labelTransform.setAttribute('translation', `${node.x + getNodeRadius(node) + 10} ${node.y} ${node.z}`);
+
+      const billboard = document.createElement('Billboard');
+      billboard.setAttribute('axisOfRotation', '0 0 0');
+
+      const shape = document.createElement('Shape');
+
+      const appearance = document.createElement('Appearance');
+      const material = document.createElement('Material');
+      material.setAttribute('diffuseColor', '0 0 0');
+      material.setAttribute('emissiveColor', '0 0 0');
+      appearance.appendChild(material);
+
+      const text = document.createElement('Text');
+      text.setAttribute('string', truncateLabel(node.label));
+      text.setAttribute('solid', 'true');
+
+      const fontStyle = document.createElement('FontStyle');
+      fontStyle.setAttribute('size', '24'); // Increased font size for better visibility
+      fontStyle.setAttribute('family', '"SERIF"');
+      fontStyle.setAttribute('justify', '"BEGIN"');
+      text.appendChild(fontStyle);
+
+      shape.appendChild(appearance);
+      shape.appendChild(text);
+      billboard.appendChild(shape);
+      labelTransform.appendChild(billboard);
+
+      if (!showLabels) {
+        labelTransform.setAttribute('scale', '0 0 0');
+      }
+
+      labelGroup.appendChild(labelTransform);
+      labelShapes[node.id] = labelTransform;
+    }
+
+    // Create arc label for relationship
+    function createArcLabel(link, source, target, index) {
+      // Calculate middle point between source and target
+      const midX = (source.x + target.x) / 2;
+      const midY = (source.y + target.y) / 2 + 20; // Offset to avoid overlap with line
+      const midZ = (source.z + target.z) / 2;
+
+      const labelTransform = document.createElement('Transform');
+      labelTransform.setAttribute('translation', `${midX} ${midY} ${midZ}`);
+      labelTransform.setAttribute('data-link-index', index);
+
+      const billboard = document.createElement('Billboard');
+      billboard.setAttribute('axisOfRotation', '0 0 0');
+
+      const shape = document.createElement('Shape');
+
+      const appearance = document.createElement('Appearance');
+      const material = document.createElement('Material');
+
+      // Match color to the relationship type
+      const textColor = link.type === 'ARRAY_ELEMENT' ? '1.0 0.5 0.05' : '0.12 0.47 0.71';
+      material.setAttribute('diffuseColor', textColor);
+      material.setAttribute('emissiveColor', textColor);
+
+      appearance.appendChild(material);
+
+      const text = document.createElement('Text');
+      text.setAttribute('string', '"'+link.propertyLabel+'"' || '');
+      text.setAttribute('solid', 'false');
+
+      const fontStyle = document.createElement('FontStyle');
+      fontStyle.setAttribute('size', '22'); // Increased font size for better visibility
+      fontStyle.setAttribute('family', '"SERIF"');
+      fontStyle.setAttribute('justify', '"BEGIN"');
+      text.appendChild(fontStyle);
+
+      shape.appendChild(appearance);
+      shape.appendChild(text);
+      billboard.appendChild(shape);
+      labelTransform.appendChild(billboard);
+
+      if (!showArcLabels) {
+        labelTransform.setAttribute('scale', '0 0 0');
+      }
+
+      arcLabelGroup.appendChild(labelTransform);
+      arcLabelShapes[`${link.source}-${link.target}-${index}`] = labelTransform;
+    }
+
+    // Get node radius based on type
+    function getNodeRadius(node) {
+      // Increased size for better visibility (multiplied by 3 for 6x scale)
+      if (node.type === 'OBJECT') return 36; // was 18
+      if (node.type === 'ARRAY') return 30;  // was 15
+      if (node.type === 'TEXT') return 25;   // was ~10, increased more for text nodes
+      return 20;                            // was 10
+    }
+
+    // Get node value based on type
+    function getNodeValue(node) {
+      if (node.type === 'INTEGER' && node.int_value !== undefined) return node.int_value;
+      if (node.type === 'TEXT' && node.text_value !== undefined) return node.text_value;
+      if (node.type === 'BOOLEAN' && node.bool_value !== undefined) return node.bool_value ? 'true' : 'false';
+      if (node.type === 'REAL' && node.real_value !== undefined) return node.real_value;
+      if (node.type === 'NUMERIC' && node.numeric_value !== undefined) return node.numeric_value;
+      if (node.type === 'OBJECT') return 'Object';
+      if (node.type === 'ARRAY') return 'Array';
+      if (node.type === 'NULL') return 'null';
+      return '';
+    }
+
+    // Truncate long label
+    function truncateLabel(label) {
+      if (!label) return '';
+      // return label.length > 20 ? label.substring(0, 17) + '...' : label;
+      return '"'+label+'"';
+    }
+
+    // Handle node click
+    function handleNodeClick(node) {
+      // Display node info
+      const tooltipContent = `
+        <strong>ID:</strong> ${node.id}<br>
+        <strong>Type:</strong> ${node.type}<br>
+        <strong>Value:</strong> ${getNodeValue(node)}<br>
+        ${node.file ? `<strong>Source File:</strong> ${node.file}` : ''}
+      `;
+
+      tooltip.innerHTML = tooltipContent;
+      tooltip.style.display = 'block';
+      tooltip.style.left = '230px'; // Position to the right of the controls
+      tooltip.style.top = '20px';
+
+      // Find connected links
+      const connectedLinks = links.filter(link =>
+        link.source === node.id || link.target === node.id
+      );
+
+      // Highlight connected nodes
+      const connectedNodeIds = new Set();
+      connectedLinks.forEach(link => {
+        connectedNodeIds.add(link.source);
+        connectedNodeIds.add(link.target);
+      });
+
+      // Reset all node appearances
+      Object.values(nodeShapes).forEach(nodeShape => {
+        const material = nodeShape.querySelector('Material');
+        const nodeId = parseInt(nodeShape.getAttribute('data-id'));
+        const nodeObj = nodes.find(n => n.id === nodeId);
+        material.setAttribute('diffuseColor', colorMap[nodeObj.type] || '0.5 0.5 0.5');
+      });
+
+      // Highlight selected and connected nodes
+      connectedNodeIds.forEach(id => {
+        const nodeShape = nodeShapes[id];
+        if (nodeShape) {
+          const material = nodeShape.querySelector('Material');
+          material.setAttribute('diffuseColor', '1 1 0'); // Yellow highlight
+        }
+      });
+
+      // Remember the selected node
+      selectedNodeId = node.id;
+
+      // Position camera to focus on this node
+      focusOnNode(node);
+
+      // Update status
+      statusDisplay.textContent = `Selected node: ${node.label} (ID: ${node.id}, Type: ${node.type})`;
+    }
+
+// Focus on a specific node
+function focusOnNode(node) {
+  const viewpoint = document.getElementById('main-viewpoint');
+  // Position the camera to look at the node from a distance
+  const distance = 200; // Increased distance for better view
+  viewpoint.setAttribute('position', `${node.x} ${node.y} ${node.z + distance}`);
+  viewpoint.setAttribute('centerOfRotation', `${node.x} ${node.y} ${node.z}`);
+}
+// Toggle labels visibility
+function toggleLabels() {
+showLabels = !showLabels;
+
+// Toggle visibility of all labels
+Object.values(labelShapes).forEach(labelShape => {
+labelShape.setAttribute('scale', showLabels ? '1 1 1' : '0 0 0');
+});
+
+const labelElements = labelGroup.querySelectorAll('Transform');
+labelElements.forEach(label => {
+label.setAttribute('scale', showLabels ? '1 1 1' : '0 0 0');
+});
+
+statusDisplay.textContent = `Labels ${showLabels ? 'shown' : 'hidden'}`;
+}
+
+// Toggle arc labels visibility
+function toggleArcLabels() {
+showArcLabels = !showArcLabels;
+
+// Toggle visibility of all arc labels
+Object.values(arcLabelShapes).forEach(arcLabelShape => {
+arcLabelShape.setAttribute('scale', showArcLabels ? '1 1 1' : '0 0 0');
+});
+
+const arcLabelElements = arcLabelGroup.querySelectorAll('Transform');
+arcLabelElements.forEach(label => {
+label.setAttribute('scale', showArcLabels ? '1 1 1' : '0 0 0');
+});
+
+statusDisplay.textContent = `Arc Labels ${showArcLabels ? 'shown' : 'hidden'}`;
+}
+
+// Search for nodes by label
+function searchNodes() {
+const searchTerm = searchInput.value.trim().toLowerCase();
+
+if (!searchTerm) {
+statusDisplay.textContent = "Please enter a search term";
+return;
+}
+
+const matchingNodes = nodes.filter(node =>
+node.label && node.label.toLowerCase().includes(searchTerm)
+);
+
+if (matchingNodes.length === 0) {
+statusDisplay.textContent = `No nodes found matching "${searchTerm}"`;
+return;
+}
+
+// Select the first matching node
+handleNodeClick(matchingNodes[0]);
+statusDisplay.textContent = `Found ${matchingNodes.length} nodes matching "${searchTerm}". Showing first match.`;
+}
+
+// Reset view to show all nodes
+function resetView() {
+const viewpoint = document.getElementById('main-viewpoint');
+// Position the camera to see the entire graph
+viewpoint.setAttribute('position', '0 0 3000');
+viewpoint.setAttribute('orientation', '0 0 1 0');
+viewpoint.setAttribute('centerOfRotation', '0 0 0');
+
+// Clear any node selection
+if (selectedNodeId) {
+// Reset highlight of previously selected node
+const nodeShape = nodeShapes[selectedNodeId];
+if (nodeShape) {
+const material = nodeShape.querySelector('Material');
+const nodeObj = nodes.find(n => n.id === selectedNodeId);
+material.setAttribute('diffuseColor', colorMap[nodeObj.type] || '0.5 0.5 0.5');
+}
+selectedNodeId = null;
+}
+
+// Hide tooltip
+tooltip.style.display = 'none';
+
+statusDisplay.textContent = 'View reset. Use mouse to rotate, scroll to zoom.';
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,259 @@
+Project Prompt: Python Object Graph Storage, Retrieval, and D3 Visualization
+
+Please generate the full source code for a system designed to store and retrieve arbitrary Python object graphs using SQLite, and visualize this graph data using D3.js via web servers. The system comprises Python scripts for database management/export and server scripts (PHP, Node.js) for visualization data.
+
+I. Project Goal:
+
+Create a system capable of:
+
+Storing: Persisting complex Python data structures (including dictionaries with non-string keys, lists, collections.OrderedDict, tuples, primitives, shared object references, and cyclical references) within an SQLite database.
+
+Importing: Loading data into the database from:
+
+Single .py files (defining a top-level data_structure variable).
+
+Single .json files.
+
+Entire directory hierarchies containing .py and/or .json files.
+
+Exporting: Retrieving the stored data from the database and outputting it in various formats:
+
+Python pickle format.
+
+Human-readable Python pprint format.
+
+JavaScript literal string format.
+
+A specific D3.js-compatible JSON format tailored for network graph visualization.
+
+Serving: Providing web server implementations (both PHP and Node.js) that serve:
+
+An index.html file for the visualization frontend.
+
+The D3.js-compatible JSON data via a /data endpoint.
+
+Visualizing: Rendering the data as an interactive network graph using D3.js (v7+):
+
+Primary data entities (Objects, Arrays, primitive Values, etc.) are displayed as distinct nodes.
+
+Relationships (dictionary keys, list/tuple indices) between parent and child entities are represented by labels placed directly on the links connecting the corresponding parent and child nodes. These relationship specifiers should not appear as separate nodes in the graph visualization itself.
+
+II. Database Schema (generic_store.db)
+
+Design an SQLite schema consisting of three main tables:
+
+EntityType Table:
+
+id (INTEGER PRIMARY KEY AUTOINCREMENT)
+
+name (TEXT UNIQUE NOT NULL) - Stores the type classification (e.g., 'Object', 'Array', 'String').
+
+Initial Data: Must contain rows for 'Object', 'Array', 'Version', 'String', 'Number', 'Boolean', 'Null'. ('Version' is specifically for Python OrderedDict).
+
+Entity Table:
+
+id (INTEGER PRIMARY KEY AUTOINCREMENT)
+
+entity_type_id (INTEGER NOT NULL, REFERENCES EntityType(id)) - Foreign key linking to the type.
+
+value_str (TEXT NULL) - Stores string value if the entity type is 'String'.
+
+value_num (REAL NULL) - Stores numeric value (integer or float) if the entity type is 'Number'.
+
+value_bool (INTEGER NULL) - Stores boolean value (0 or 1) if the entity type is 'Boolean'.
+
+Purpose: Represents every distinct node (data entity or relationship specifier) in the graph. For container types ('Object', 'Array', 'Version'), the value_* columns will be NULL.
+
+Relationship Table:
+
+id (INTEGER PRIMARY KEY AUTOINCREMENT)
+
+parent_entity_id (INTEGER NOT NULL, REFERENCES Entity(id)) - The ID of the parent entity (e.g., the Object or Array).
+
+child_entity_id (INTEGER NOT NULL, REFERENCES Entity(id)) - The ID of the child entity (e.g., the value associated with a key or index).
+
+relationship_specifier_id (INTEGER NOT NULL, REFERENCES Entity(id)) - The ID of the entity representing the key or index used to link the parent to the child.
+
+Constraints: UNIQUE(parent_entity_id, relationship_specifier_id) - A parent cannot have the same key/index pointing to multiple children (ensures dict/list-like structure).
+
+III. Python Scripts (using sqlite3 module, Python 3.6+)
+
+create_schema.py:
+
+Function: Initializes or resets the generic_store.db SQLite database file.
+
+Tasks:
+
+Connect to the database (creating it if it doesn't exist).
+
+Drop existing tables (if recreating).
+
+Execute CREATE TABLE statements for EntityType, Entity, and Relationship as defined above.
+
+Populate the EntityType table with the required initial data ('Object', 'Array', 'Version', 'String', 'Number', 'Boolean', 'Null').
+
+Enable foreign key support (PRAGMA foreign_keys=ON;).
+
+Create necessary indexes (e.g., on FK columns, value_* columns in Entity, parent_entity_id/child_entity_id/relationship_specifier_id in Relationship) for performance.
+
+Include user feedback (print statements).
+
+import_data.py:
+
+Input: Command-line argument specifying the path to a single .py file, a single .json file, or a directory. (argparse)
+
+Functionality: Parses the input and populates the SQLite database.
+
+File Handling:
+
+.py: Use importlib.util to load the file and access the data_structure variable.
+
+.json: Use json.load(). Crucially, when loading from JSON, do not use object_pairs_hook=OrderedDict. Standard JSON objects ({...}) must be loaded as regular Python dicts. These dicts will subsequently be mapped to the 'Object' EntityType in the database.
+
+Directory Handling:
+
+Use os.walk to traverse the directory.
+
+For each directory encountered, create an 'Object' type Entity.
+
+Link subdirectories and processable files (.py, .json) under their parent directory's 'Object' entity. Use the file/subdirectory name (without extension) as a 'String' type Entity for the relationship_specifier_id.
+
+Handle potential redundant traversals if necessary (e.g., basic path caching).
+
+Recursive Import (import_node function):
+
+Traverse the loaded Python data structure recursively.
+
+Type Mapping: Map Python types to EntityType names (dict -> 'Object', list/tuple -> 'Array', collections.OrderedDict -> 'Version', str -> 'String', int/float -> 'Number', bool -> 'Boolean', None -> 'Null'). Handle unsupported types by storing their repr() as 'String'.
+
+Object Identity/Cycles: Use a cache (e.g., a dictionary mapping id(node) to entity_id) passed through recursion to detect shared object instances and cycles within a single loaded structure. Reuse the entity_id if an object is revisited. Apply this caching primarily to container types (dict, list, tuple, OrderedDict).
+
+Primitive Sharing: Implement value-based sharing for primitive types ('String', 'Number', 'Boolean', 'Null'). Before inserting a primitive entity, check (using an in-memory cache and/or a database query) if an entity of the same type and value already exists. If so, reuse its entity_id. Otherwise, insert the new primitive entity and cache its ID.
+
+Entity Insertion: Insert rows into the Entity table for each unique node encountered (respecting identity and primitive sharing).
+
+Relationship Insertion: For container types, iterate through items/elements. Recursively call import_node for both the key/index (specifier) and the value (child). Create a row in the Relationship table linking the parent entity_id to the child entity_id via the specifier entity_id.
+
+Database: Use transactions (BEGIN, COMMIT, ROLLBACK) for atomicity. Include clear print statements for progress and robust error handling for file I/O and database operations.
+
+export_data.py:
+
+Input: Command-line arguments for the output file path, database path, and desired output format (--format). Supported formats: pickle, pprint, javascript (or js), d3json. (argparse)
+
+Functionality: Reads data from the database and exports it in the specified format.
+
+Root Finding: Identify a suitable root entity (or entities) to start the export from (e.g., entities that are never referenced as child_entity_id). Handle cases with multiple potential roots if necessary.
+
+Reconstruction (pickle, pprint, javascript formats):
+
+Implement a recursive rebuild_node function.
+
+Use caching (mapping entity_id to the reconstructed Python object) to handle shared references.
+
+Implement cycle detection (e.g., using temporary placeholders during recursion) and handle cycles appropriately for each format (pickle handles them natively; pprint might show <Recursion on dict with id=...>; javascript should output a placeholder like "[Circular Reference]").
+
+Reconstruct Python objects based on EntityType and Relationship data. Handle potential non-standard list indices if necessary. Reconstruct OrderedDict for 'Version' types.
+
+Handle non-hashable keys/specifiers during reconstruction (e.g., issue warnings).
+
+Pickle: pickle.dump the fully reconstructed root object(s).
+
+pprint: pprint.pformat the reconstructed root object(s) and write to the file.
+
+javascript: Serialize the reconstructed object(s) into a JavaScript literal string. Convert non-string dictionary keys to strings using str() (issue warnings). Assign to a JS variable (e.g., const exportedData = ...;) and write to the file.
+
+d3json Format (Specific Logic):
+
+Do NOT use rebuild_node. Query the database directly.
+
+Node Filtering: Identify the set of entity_ids that should appear as nodes in the visualization. These are typically entities referenced as parent_entity_id or child_entity_id in the Relationship table, plus any potential root nodes not otherwise referenced. Entities that only serve as relationship_specifier_id for primitives (like simple strings or numbers) should generally be excluded from the nodes list.
+
+Node Data: Query the Entity table for the filtered node IDs. Create a list of node objects, each containing id (the entity_id), type (the EntityType name), value (the primitive value, if applicable), and a suitable label for display (e.g., type name for containers, formatted value for primitives).
+
+Link Generation: Query the Relationship table.
+
+Link Filtering: For each relationship row, include it as a link only if both its parent_entity_id and child_entity_id are present in the filtered list of node IDs generated earlier.
+
+Embed Specifier Info in Links: For each valid link, fetch the details (type and value) of the corresponding relationship_specifier_id entity from the Entity table. Add this information directly to the link object. Include fields like source (parent_entity_id), target (child_entity_id), specifier_id, spec_type, spec_value, specifier_complex (boolean flag indicating if specifier was an Object/Array), and importantly, a display label derived from the specifier's value (e.g., the string key, the numeric index).
+
+Output: Use json.dump to write the final dictionary {"nodes": nodes_list, "links": links_list} to the output file.
+
+Include robust error handling and user feedback.
+
+IV. Server Scripts
+
+serve_graph.php (using PHP pdo_sqlite):
+
+Function: Acts as a simple web server (runnable via php -S localhost:8000).
+
+Endpoints:
+
+/: Serves the static index.html file.
+
+/data: Connects to generic_store.db. Implements the exact same node filtering, link generation, and specifier info embedding logic described for the d3json export format above. Queries the database and outputs the {"nodes": ..., "links": ...} JSON structure required by the D3 visualization.
+
+Include Content-Type headers (text/html, application/json) and basic error handling.
+
+server.js (using Node.js, express, sqlite3):
+
+Function: Acts as a simple web server (runnable via node server.js).
+
+Dependencies: express, sqlite3.
+
+Endpoints:
+
+/: Serves the static index.html file (e.g., using express.static or res.sendFile).
+
+/data: Connects to generic_store.db. Implements the exact same node filtering, link generation, and specifier info embedding logic described for the d3json export format above. Queries the database asynchronously, constructs the {"nodes": ..., "links": ...} structure, and sends it as a JSON response.
+
+Include proper asynchronous handling, database connection management (opening/closing), and robust error handling.
+
+V. HTML Visualization File (index.html)
+
+Structure: Standard HTML5 document.
+
+Libraries: Include D3.js (version 7 or later).
+
+JavaScript Logic:
+
+Fetch graph data from the /data endpoint.
+
+Display loading indicators and handle potential fetch errors.
+
+Perform basic validation on the received JSON data (nodes, links arrays).
+
+Client-Side Link Filtering (Safety): Filter the received links array again to ensure link.source and link.target refer to IDs present in the nodes array.
+
+Initialize a D3 force simulation (forceSimulation) with appropriate forces (forceLink, forceManyBody, forceCenter, forceCollide). Configure parameters for a stable and readable layout.
+
+Create an SVG canvas.
+
+Implement zoom and pan functionality on the SVG canvas.
+
+Draw SVG elements bound to the data:
+
+<g> elements to group links and nodes.
+
+<line> elements for links, bound to the links data. Style potentially based on spec_type.
+
+<circle> elements for nodes, bound to the nodes data. Style based on node.type (color, size). Add tooltips (<title>) showing node details (id, type, value).
+
+Node <text> labels positioned near circles, displaying node.label.
+
+Link <text> labels positioned near the midpoint of each link line, displaying the link.label (which represents the relationship specifier/key/index). Ensure these labels have good contrast and readability (e.g., using a text background or halo effect via CSS stroke).
+
+Implement node dragging functionality using d3.drag integrated with the simulation.
+
+Include basic UI elements for loading status and error messages.
+
+VI. General Requirements:
+
+Python Version: Code should be compatible with Python 3.6+.
+
+Clarity: Use clear variable names and add comments for complex logic sections.
+
+Error Handling: Implement robust error handling for file operations, database interactions, data parsing, and network requests across all components.
+
+User Feedback: Provide informative print statements during script execution (e.g., connecting to DB, starting import, file processed, transaction commit/rollback, export complete).
+
+CLI: Python scripts (import_data.py, export_data.py) should be runnable from the command line with arguments parsed using argparse.

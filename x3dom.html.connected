@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>3D Python Object Graph</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://www.x3dom.org/download/x3dom.js"></script>
+    <link rel="stylesheet" href="https://www.x3dom.org/download/x3dom.css">
+    <style>
+        body { margin: 0; overflow: hidden; }
+        x3d { width: 100vw; height: 100vh; display: block; }
+    </style>
+</head>
+<body>
+    <x3d>
+        <scene>
+            <Background skyColor="0.7 0.7 0.9"></Background>
+            <Viewpoint position="0 0 5" centerOfRotation="0 0 0"></Viewpoint>
+            <NavigationInfo type='"EXAMINE"'></NavigationInfo>
+
+            <Group id="node-group"></Group>
+            <Group id="link-group"></Group>
+            <Group id="label-group"></Group> <!-- Add Label Group -->
+        </scene>
+    </x3d>
+
+    <script>
+        // --- Fetch Data from Server ---
+        fetch('/data')
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(errData => {
+                        throw new Error(`HTTP error ${response.status}: ${errData.error || response.statusText}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.links)) {
+                    throw new Error("Invalid data format received from server.");
+                }
+                renderGraph(data.nodes, data.links);
+            })
+            .catch(error => {
+                console.error('Error fetching or processing graph data:', error);
+            });
+
+        function renderGraph(nodes, links) {
+            const nodeGroup = document.getElementById("node-group");
+            const linkGroup = document.getElementById("link-group");
+            const labelGroup = document.getElementById("label-group");
+
+            // --- Calculate 3D Layout (Scaled Random) ---
+            const scale = 1;
+            nodes.forEach(node => {
+                node.x = (Math.random() * 2 - 1) * scale;
+                node.y = (Math.random() * 2 - 1) * scale;
+                node.z = (Math.random() * 2 - 1) * scale;
+            });
+
+            // --- Render Nodes ---
+            nodes.forEach(node => {
+                const transform = document.createElement("Transform");
+                transform.setAttribute("translation", `${node.x} ${node.y} ${node.z}`);
+                transform.setAttribute("DEF", `node-${node.id}`);
+
+                const shape = document.createElement("Shape");
+                const appearance = document.createElement("Appearance");
+                const material = document.createElement("Material");
+                material.setAttribute("diffuseColor", getNodeColor(node.type));
+                appearance.appendChild(material);
+
+                const sphere = document.createElement("Sphere");
+                sphere.setAttribute("radius", "0.1");
+                sphere.setAttribute("solid", false);
+
+                shape.appendChild(sphere);
+                transform.appendChild(shape);
+                nodeGroup.appendChild(transform);
+
+                transform.addEventListener("mousedown", dragStart);
+                transform.addEventListener("mouseup", dragEnd);
+                transform.addEventListener("mousemove", dragging);
+
+                // --- Add Node Label ---
+                addNodeLabel(node, labelGroup);
+            });
+
+            // --- Render Links ---
+            links.forEach(link => {
+                const sourceNode = nodes.find(n => n.id === link.source);
+                const targetNode = nodes.find(n => n.id === link.target);
+
+                const shape = document.createElement("Shape");
+                const appearance = document.createElement("Appearance");
+                const material = document.createElement("Material");
+                material.setAttribute("emissiveColor", getLinkColor(link));  // Use link color
+                appearance.appendChild(material);
+
+                const lineSet = document.createElement("LineSet");
+                const coordinates = document.createElement("Coordinate");
+                coordinates.setAttribute("point", `${sourceNode.x} ${sourceNode.y} ${sourceNode.z}, ${targetNode.x} ${targetNode.y} ${targetNode.z}`);
+                lineSet.appendChild(coordinates);
+
+                shape.appendChild(lineSet);
+                linkGroup.appendChild(shape);
+            });
+
+            // --- Dragging Functions ---
+            let draggedNode = null;
+            let startX, startY;
+
+            function dragStart(event) {
+                draggedNode = event.target;
+                startX = event.clientX;
+                startY = event.clientY;
+            }
+
+            function dragging(event) {
+                if (draggedNode) {
+                    const dx = (event.clientX - startX) * 0.01;
+                    const dy = (event.clientY - startY) * 0.01;
+
+                    // Get the current translation values
+                    const currentTranslation = draggedNode.getAttribute('translation').split(' ').map(Number);
+                    const newX = currentTranslation[0] + dx;
+                    const newY = currentTranslation[1] + dy;
+
+                    // Apply the new translation values:
+                    draggedNode.setAttribute('translation', `${newX} ${newY} ${currentTranslation[2]}`);
+                }
+                // set the new values.
+                startX = event.clientX;
+                startY = event.clientY;
+            }
+
+            function dragEnd(event) {
+                draggedNode = null;
+            }
+
+        } // end renderGraph
+
+          function addNodeLabel(node, labelGroup) {
+            try {
+                const x = node.x || 0;
+                const y = node.y || 0;
+                const z = node.z || 0;
+
+                const labelTransform = document.createElement('Transform');
+                labelTransform.setAttribute('translation', `${x} ${y + 0.2} ${z}`); // Offset label slightly above the node
+                labelTransform.setAttribute('scale', '0.05 0.05 0.05'); // Adjust the size of the label
+
+                // Add Billboard node to always face the camera
+                const billboard = document.createElement('Billboard');
+                billboard.setAttribute('axisOfRotation', '0 0 0'); // Rotate around all axes
+
+                const shape = document.createElement('Shape');
+                const appearance = document.createElement('Appearance');
+                const material = document.createElement('Material');
+                material.setAttribute('diffuseColor', '0 0 0'); // Black color for the label
+                appearance.appendChild(material);
+                shape.appendChild(appearance);
+
+                const text = document.createElement('Text');
+                text.setAttribute('string', `"${node.label || node.id}"`); // Use node.label as the label, fallback to node.id
+                text.setAttribute('solid', 'false');
+
+                const fontStyle = document.createElement('FontStyle');
+                fontStyle.setAttribute('size', '1');
+                fontStyle.setAttribute('family', '"Arial, sans-serif"');
+                text.appendChild(fontStyle);
+
+                shape.appendChild(text);
+                billboard.appendChild(shape); // Append shape to billboard
+                labelTransform.appendChild(billboard); // Append billboard to labelTransform
+                labelGroup.appendChild(labelTransform);
+
+            } catch (renderError) {
+                console.error("Error in rendering label element", renderError);
+            }
+        }
+
+        // --- Node Color Mapping (from your previous code) ---
+        function getNodeColor(nodeType) {
+            switch (nodeType) {
+                case 'Object': return '#1f77b4'; // Blue
+                case 'Array': return '#ff7f0e'; // Orange
+                case 'Version': return '#aec7e8'; // Light Blue (for OrderedDict)
+                case 'String': return '#2ca02c'; // Green
+                case 'Number': return '#d62728'; // Red
+                case 'Boolean': return '#9467bd'; // Purple
+                case 'Null': return '#8c564b'; // Brown
+                default: return '#7f7f7f'; // Grey
+            }
+        }
+
+         function getLinkColor(link) {
+            if (link.specifier_complex) {
+                 return '0.61 0.35 0.71';
+            }
+            switch (link.spec_type) {
+                case 'Number': return '#3498db';
+                case 'String': return '#e74c3c';
+                case 'Boolean': return '#f1c40f';
+                default: return '0.6 0.6 0.6';
+            }
+        }
+    </script>
+</body>
+</html>

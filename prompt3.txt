@@ -1,0 +1,127 @@
+Okay, incorporating standard JSON import and JavaScript literal export adds more complexity, especially around type fidelity and handling structures not representable in those formats. Here's the refined prompt specifying these additions and their expected behavior:
+
+Prompt:
+
+Please create a system for storing and retrieving arbitrary Python object graphs (representing potentially complex JavaScript-like data structures) using an SQLite database. The system should consist of three Python scripts: one to create the database schema, one to import data into the database, and one to export data from the database.
+
+I. Database Schema (generic_store.db)
+
+Design an SQLite schema with three tables: EntityType, Entity, and Relationship.
+
+EntityType Table:
+
+Columns: id (INTEGER PRIMARY KEY AUTOINCREMENT), name (TEXT UNIQUE NOT NULL).
+
+Initial Data: Must contain 'Object', 'Array', 'Version', 'String', 'Number', 'Boolean', 'Null'.
+
+Entity Table:
+
+Columns: id, entity_type_id (FK), value_str, value_num, value_bool.
+
+Purpose: Represents every node. Value columns are NULL for containers ('Object', 'Array', 'Version').
+
+Relationship Table:
+
+Columns: id, parent_entity_id (FK), child_entity_id (FK), relationship_specifier_id (FK).
+
+Purpose: Defines graph structure. child_entity_id and relationship_specifier_id can reference any Entity type.
+
+For 'Version' parents, specifiers can be 'String' (key) or 'Number' (index).
+
+Constraints: UNIQUE(parent_entity_id, relationship_specifier_id).
+
+II. Python Scripts
+
+Create three separate Python 3 scripts using sqlite3.
+
+create_schema.py:
+
+Creates/recreates the DB file (e.g., generic_store.db).
+
+Executes CREATE TABLE statements.
+
+Enforces foreign keys.
+
+Populates EntityType table.
+
+Creates indexes.
+
+import_data.py: (Renamed for clarity)
+
+Accepts an input file path via argparse. Detect file type based on extension:
+
+.py: Load a data_structure variable using importlib as previously described.
+
+.json: Load data using json.load(). Standard JSON will result in dict, list, str, int, float, bool, None.
+
+Connects to the database.
+
+Implements import_node to recursively traverse the loaded Python object graph.
+
+For each node:
+
+Map Python types to DB EntityType (dict->'Object', list->'Array', collections.OrderedDict->'Version', tuple->'Array' or 'Tuple', primitives->corresponding types). Raise TypeError for unsupported types.
+
+Insert into Entity.
+
+Use id(node) -> entity_id cache for identity/cycles.
+
+For container nodes:
+
+dict ('Object'): Iterate items(). Import key & value. Create relationship (key's entity ID = specifier).
+
+list/tuple ('Array'/'Tuple'): Iterate enumerate(). Import index (as 'Number' entity) & value. Create relationship (index's entity ID = specifier).
+
+OrderedDict ('Version'): Iterate items(). Import key & value. Create relationship (key's entity ID = specifier). Preserve order.
+
+Use transactions.
+
+export_data.py: (Renamed for clarity)
+
+Accepts output file path, optional database path, and --format via argparse.
+
+Supported formats: 'pickle', 'pprint', 'javascript' (or 'js'). Default 'pickle'.
+
+Connects to the database.
+
+Finds root entity.
+
+Implements rebuild_node using caching (entity_id -> object) for sharing/cycles.
+
+rebuild_node logic:
+
+Fetch entity data.
+
+Base cases: Return corresponding Python primitives.
+
+Containers:
+
+'Object': Rebuild as dict. Fetch relations, rebuild specifiers (keys) & children (values). Populate dict. Warn/handle non-hashable keys.
+
+'Array'/'Tuple': Rebuild as list (or tuple). Attempt standard list reconstruction (sequential integer specifiers). Fallback to list of [specifier, value] pairs with warning.
+
+'Version': Rebuild as collections.OrderedDict. Fetch relations (ordered by Relationship.id). Rebuild specifiers (keys) & children (values). Populate OrderedDict.
+
+Perform export based on format:
+
+'pickle': Use pickle.dump(). Handles cycles/sharing.
+
+'pprint': Use pprint.pformat() and write to text file. Visualizes structure well.
+
+'javascript':
+
+Implement a function to recursively serialize the rebuilt Python object into a JavaScript literal string.
+
+This serializer should handle primitives (string escaping, numbers, boolean, null -> null).
+
+Objects (dict, OrderedDict/'Version'): Generate JavaScript Object literals ({}). Crucially, if a specifier (key) rebuilt from the DB is not a string, convert it to its string representation (str(key)) for the JavaScript literal. Add a warning if this conversion happens. OrderedDict order may be lost in the standard JS literal.
+
+Arrays (list/'Array'/'Tuple'): Generate JavaScript Array literals ([]). If the rebuilt structure is a standard Python list (from sequential integer specifiers), generate a standard JS array. If it's a list of [specifier, value] pairs (due to complex specifiers), generate a JS array of arrays [[spec1, val1], [spec2, val2], ...]. The serializer needs to handle recursive calls for these specifiers/values.
+
+Cycles/Sharing: Standard JS literals cannot represent these. The serializer should ideally detect cycles using the rebuild cache and either: a) raise an error, b) represent cycles with a placeholder like "[Circular Reference]", or c) stop recursion (potentially creating incomplete output). State the chosen behavior. Simple recursion will likely cause RecursionError.
+
+Write the resulting string to the output .js file, typically assigning it to a variable (e.g., const exportedData = ... ;).
+
+Do not use json.dump for any format except potentially as a part of the JavaScript string generation for simple values.
+
+Ensure all scripts include necessary imports (json, importlib, collections, pickle, pprint), error handling, clear print statements, command-line usability, and comments explaining logic, especially the handling of complex types in JavaScript export.

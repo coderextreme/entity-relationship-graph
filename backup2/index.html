@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DB Graph Visualization</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; overflow: hidden; }
+        svg { width: 100vw; height: 100vh; display: block; }
+        .nodes circle { stroke: #fff; stroke-width: 1.5px; cursor: grab; }
+        .nodes circle:active { cursor: grabbing; }
+        .labels text {
+            font-size: 10px;
+            fill: #333;
+            pointer-events: none;
+            text-anchor: middle;
+            dominant-baseline: central;
+            paint-order: stroke; /* Draw stroke behind fill */
+            stroke: white;
+            stroke-width: 2.5px;
+            stroke-linecap: round; /* Smooth edges */
+            stroke-linejoin: round;
+         }
+
+        .links line {
+            stroke: #aaa; /* Slightly lighter base */
+            stroke-opacity: 0.7;
+            stroke-width: 1.5px;
+        }
+        /* Styling based on specifier type */
+        .links line.spec-String { stroke: #888; }
+        .links line.spec-Number { stroke: #88d; stroke-dasharray: 3,2; }
+        .links line.spec-Boolean { stroke: #d88; }
+        .links line.spec-Null { stroke: #ccc; stroke-dasharray: 1,3; }
+        .links line.spec-complex { stroke: #f80; stroke-width: 2px; }
+
+
+        /* Style for link labels */
+        .link-labels text {
+             font-family: sans-serif;
+             font-size: 9px;
+             fill: #333; /* Darker text for contrast */
+             pointer-events: none;
+             text-anchor: middle;
+             dominant-baseline: text-after-edge; /* Position slightly above the middle */
+             paint-order: stroke;
+             stroke: rgba(255, 255, 255, 0.8); /* Semi-transparent white halo */
+             stroke-width: 3px;
+             stroke-linejoin: round;
+        }
+    </style>
+</head>
+<body>
+    <svg id="graph-container"></svg>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script>
+        const svg = d3.select("#graph-container");
+        const width = +svg.node().getBoundingClientRect().width;
+        const height = +svg.node().getBoundingClientRect().height;
+        const color = d3.scaleOrdinal(d3.schemeTableau10); // Different color scheme
+        const mainGroup = svg.append("g"); // Group for zoom
+
+        const loadingText = mainGroup.append("text")
+            .attr("x", width / 2)
+            .attr("y", height / 2)
+            .attr("text-anchor", "middle")
+            .text("Loading graph data...");
+
+        d3.json("/data").then(graph => {
+            loadingText.remove();
+
+            if (!graph || !graph.nodes || !graph.links) {
+                 console.error("Invalid data received from server:", graph);
+                 mainGroup.append("text").attr("x", width / 2).attr("y", height / 2).attr("text-anchor", "middle").text("Error loading graph data.");
+                 return;
+            }
+             if (graph.nodes.length === 0) {
+                 mainGroup.append("text").attr("x", width / 2).attr("y", height / 2).attr("text-anchor", "middle").text("No graph data found in database.");
+                 return;
+             }
+
+            const links = graph.links;
+            const nodes = graph.nodes;
+
+             // Add check for missing nodes referenced by links
+            const nodeIds = new Set(nodes.map(n => n.id));
+            const validLinks = links.filter(l => {
+                const sourceExists = nodeIds.has(l.source);
+                const targetExists = nodeIds.has(l.target);
+                if (!sourceExists || !targetExists) {
+                    console.warn(`Filtering out link due to missing node(s):`, l, ` Source ${l.source} exists: ${sourceExists}, Target ${l.target} exists: ${targetExists}`);
+                }
+                return sourceExists && targetExists;
+            });
+            if(validLinks.length < links.length) {
+                 console.warn(`Filtered out ${links.length - validLinks.length} links due to missing source/target nodes.`);
+            }
+
+
+            // --- Force Simulation ---
+            const simulation = d3.forceSimulation(nodes) // Use original nodes list for simulation
+                .force("link", d3.forceLink(validLinks) // Use filtered links for force layout
+                                  .id(d => d.id)
+                                  .distance(d => d.spec_type === 'Number' ? 40 : 70) // Shorter distance for array indices
+                                  .strength(d => d.spec_type === 'Number' ? 0.6 : 0.4)) // Slightly stronger pull for indices
+                .force("charge", d3.forceManyBody().strength(-100)) // Increase repulsion
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collide", d3.forceCollide().radius(15)); // Increase collision radius
+
+
+            // --- Draw Links ---
+            const linkGroup = mainGroup.append("g")
+                .attr("class", "links")
+                .selectAll("g")
+                .data(validLinks) // Draw only valid links
+                .join("g");
+
+            const linkLine = linkGroup.append("line")
+                // Add class based on specifier type for specific styling
+                .attr("class", d => `spec-${d.spec_type}` + (d.specifier_complex ? ' spec-complex' : ''));
+                // Stroke color can be set via CSS or here
+                // .attr("stroke", d => d.spec_type === 'Number' ? '#88d' : '#aaa');
+
+
+            // --- Draw Link Labels ---
+            const linkLabel = linkGroup.append("text")
+                .attr("class", "link-labels")
+                .text(d => d.label) // Use the label generated by the server
+                .attr("dy", -3); // Offset slightly
+
+
+            // --- Draw Nodes ---
+            const nodeGroup = mainGroup.append("g")
+                .attr("class", "nodes")
+                .selectAll("g") // Select groups for node + label pairing
+                .data(nodes)
+                .join("g") // Join groups
+                .call(drag(simulation)); // Apply drag to the group
+
+
+             const nodeCircle = nodeGroup.append("circle")
+                 .attr("r", d => d.type === 'Object' || d.type === 'Array' || d.type === 'Version' ? 8 : 6)
+                 .attr("fill", d => color(d.type));
+
+             // Tooltip on the group or circle
+             nodeGroup.append("title")
+                .text(d => `ID: ${d.id}\nType: ${d.type}\nLabel: ${d.label}` + (d.value !== undefined ? `\nValue: ${JSON.stringify(d.value)}`:''));
+
+            // --- Draw Node Labels ---
+            const nodeLabel = nodeGroup.append("text") // Append label to the group
+                .attr("class", "labels")
+                .text(d => d.label)
+                .attr("dy", d => d.type === 'Object' || d.type === 'Array' || d.type === 'Version' ? -14 : -12); // Offset further for bigger nodes
+
+
+            // --- Simulation Tick Function ---
+            simulation.on("tick", () => {
+                linkLine
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                linkLabel
+                    .attr("x", d => (d.source.x + d.target.x) / 2)
+                    .attr("y", d => (d.source.y + d.target.y) / 2);
+
+                // Update group position, circle and label will follow
+                nodeGroup
+                    .attr("transform", d => `translate(${d.x},${d.y})`);
+
+                // // Explicitly update circle and label (alternative if group transform isn't used)
+                // nodeCircle.attr("cx", d => d.x).attr("cy", d => d.y);
+                // nodeLabel.attr("x", d => d.x).attr("y", d => d.y);
+
+            });
+
+            // --- Drag Functions ---
+            function drag(simulation) {
+                 function dragstarted(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+                 function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+                 function dragended(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+                 // Apply drag to the group selection (nodeGroup)
+                 return d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended);
+            }
+
+            // --- Zooming/Panning ---
+             const zoom = d3.zoom()
+                 .scaleExtent([0.1, 8])
+                 .on("zoom", (event) => {
+                     mainGroup.attr('transform', event.transform);
+                 });
+             svg.call(zoom).on("dblclick.zoom", null); // Disable double-click zoom
+
+        }).catch(error => {
+            loadingText.remove();
+            console.error("Error fetching or processing graph data:", error);
+            mainGroup.append("text")
+               .attr("x", width / 2)
+               .attr("y", height / 2)
+               .attr("text-anchor", "middle")
+               .text("Failed to load graph data. Check console and server logs.");
+        });
+
+    </script>
+</body>
+</html>
